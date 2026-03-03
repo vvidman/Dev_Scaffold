@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="../LICENSE" />
+    <File Path="../README.md" />
+  </Folder>
+  <Project Path="Scaffold.Application/Scaffold.Application.csproj" />
+  <Project Path="Scaffold.CLI/Scaffold.CLI.csproj" />
+  <Project Path="Scaffold.Domain/Scaffold.Domain.csproj" />
+  <Project Path="Scaffold.Infrastructure.Inference/Scaffold.Infrastructure.Inference.csproj" />
+  <Project Path="Scaffold.Infrastructure.StepConfig/Scaffold.Infrastructure.StepConfig.csproj" />
+</Solution>

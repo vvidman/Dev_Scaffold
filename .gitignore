@@ -1,0 +1,39 @@
+## Visual Studio mappák
+.vs/
+
+## Build output
+bin/
+obj/
+
+## User-specifikus fájlok
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+
+## Debug / Release
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+
+## Publish
+publish/
+
+## NuGet
+packages/
+*.nupkg
+*.snupkg
+
+## Teszteredmények
+TestResults/
+*.coverage
+*.coveragexml
+
+## Logok
+*.log
+
+## OS fájlok
+.DS_Store
+Thumbs.db
+Desktop.ini

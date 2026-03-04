@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+package scaffold.agent;
+
+option csharp_namespace = "Scaffold.Agent.Protocol";
+
+import "google/protobuf/timestamp.proto";
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+// Proto3 szabály: minden enum első értéke kötelezően 0 értékű.
+// Ez az alapértelmezett érték ha a mező nincs beállítva.
+
+enum InferenceStatus {
+    INFERENCE_STATUS_UNSPECIFIED = 0;
+    INFERENCE_STATUS_STARTED     = 1;
+    INFERENCE_STATUS_COMPLETED   = 2;
+    INFERENCE_STATUS_CANCELLED   = 3;
+    INFERENCE_STATUS_FAILED      = 4;
+}
+
+enum ModelStatus {
+    MODEL_STATUS_UNSPECIFIED = 0;
+    MODEL_STATUS_LOADING     = 1;
+    MODEL_STATUS_LOADED      = 2;
+    MODEL_STATUS_UNLOADED    = 3;
+    MODEL_STATUS_FAILED      = 4;
+}
+
+// ─────────────────────────────────────────────
+// SERVICE HOST LIFECYCLE ESEMÉNYEK
+// ─────────────────────────────────────────────
+
+// A ServiceHost elküldi miután elindult és kész fogadni parancsokat.
+// A CLI ezt várja az auto-indítás során – ez a ready jel.
+message ServiceReadyEvent {
+    string version                       = 1;
+    google.protobuf.Timestamp started_at = 2;
+}
+
+// A ServiceHost elküldi mielőtt leáll.
+// A CLI tudja hogy a kapcsolat hamarosan megszakad.
+message ServiceShuttingDownEvent {
+    bool forced                              = 1;
+    google.protobuf.Timestamp occurred_at   = 2;
+}
+
+// ─────────────────────────────────────────────
+// MODELL LIFECYCLE ESEMÉNYEK
+// ─────────────────────────────────────────────
+
+// Modell betöltési/kiürítési státusz változás.
+// Lazy betöltésnél is ez az esemény jelzi a CLI-nek
+// hogy a modell betöltése elkezdődött.
+message ModelStatusChangedEvent {
+    // Lazy betöltésnél az InferRequest request_id-ja,
+    // explicit LoadModelRequest esetén annak request_id-ja.
+    string request_id                       = 1;
+    string model_alias                      = 2;
+    ModelStatus status                      = 3;
+    string message                          = 4;  // opcionális részlet, hiba esetén hibaüzenet
+    google.protobuf.Timestamp occurred_at   = 5;
+}
+
+// ListModelsRequest válasza.
+// Csak a betöltött modelleket tartalmazza.
+message LoadedModelsListEvent {
+    string request_id                       = 1;
+    repeated string loaded_aliases          = 2;  // betöltött modell aliasok listája
+    google.protobuf.Timestamp occurred_at   = 3;
+}
+
+// ─────────────────────────────────────────────
+// INFERENCE LIFECYCLE ESEMÉNYEK
+// ─────────────────────────────────────────────
+
+// Inference elindult – a modell megkapta a kérést.
+message InferenceStartedEvent {
+    string request_id                       = 1;
+    string step_id                          = 2;
+    string model_alias                      = 3;
+    google.protobuf.Timestamp started_at    = 4;
+}
+
+// Inference folyamatban – periodikus jelzés a CLI felé.
+// Nem token-enkénti streaming – csak időszakos státusz üzenet.
+message InferenceProgressEvent {
+    string request_id                       = 1;
+    string step_id                          = 2;
+    uint32 elapsed_seconds                  = 3;
+    string status_message                   = 4;  // pl. "Generálás folyamatban..."
+    google.protobuf.Timestamp occurred_at   = 5;
+}
+
+// Inference sikeresen befejezve.
+message InferenceCompletedEvent {
+    string request_id                           = 1;
+    string step_id                              = 2;
+    string output_file_path                     = 3;  // a generált kimenet fájl elérési útja
+    uint32 elapsed_seconds                      = 4;
+    uint32 tokens_generated                     = 5;
+    google.protobuf.Timestamp completed_at      = 6;
+}
+
+// Inference megszakítva – CancelInferRequest hatására.
+message InferenceCancelledEvent {
+    string request_id                       = 1;
+    string step_id                          = 2;
+    google.protobuf.Timestamp occurred_at   = 3;
+}
+
+// Inference hiba – az AI nem tudta végrehajtani a kérést.
+message InferenceFailedEvent {
+    string request_id                       = 1;
+    string step_id                          = 2;
+    string error_message                    = 3;
+    google.protobuf.Timestamp occurred_at   = 4;
+}
+
+// ─────────────────────────────────────────────
+// ÁLTALÁNOS HIBA ESEMÉNY
+// Olyan hiba ami nem köthető konkrét kéréshez.
+// Pl. modell fájl sérült, Named Pipe hiba, stb.
+// ─────────────────────────────────────────────
+
+message ServiceErrorEvent {
+    string error_code                       = 1;  // gépi feldolgozáshoz
+    string error_message                    = 2;  // human readable
+    google.protobuf.Timestamp occurred_at   = 3;
+}
+
+// ─────────────────────────────────────────────
+// EVENT ENVELOPE
+// Az event pipe-on mindig ezt az üzenetet küldjük.
+// Ugyanaz az elv mint a CommandEnvelope-nál –
+// a oneof garantálja hogy egyszerre csak egy esemény lehet benne.
+// ─────────────────────────────────────────────
+
+message EventEnvelope {
+    oneof event {
+        ServiceReadyEvent        service_ready         = 1;
+        ServiceShuttingDownEvent service_shutting_down = 2;
+        ModelStatusChangedEvent  model_status_changed  = 3;
+        LoadedModelsListEvent    loaded_models_list    = 4;
+        InferenceStartedEvent    inference_started     = 5;
+        InferenceProgressEvent   inference_progress    = 6;
+        InferenceCompletedEvent  inference_completed   = 7;
+        InferenceCancelledEvent  inference_cancelled   = 8;
+        InferenceFailedEvent     inference_failed      = 9;
+        ServiceErrorEvent        service_error         = 10;
+    }
+}

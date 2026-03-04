@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package scaffold.agent;
+
+option csharp_namespace = "Scaffold.Agent.Protocol";
+
+import "inference.proto";
+import "models.proto";
+
+// ─────────────────────────────────────────────
+// COMMAND ENVELOPE
+// A command pipe-on mindig ezt az üzenetet küldjük.
+//
+// Importálja az inference.proto és models.proto
+// üzenettípusait – ez az egyetlen fájl ami mindkettőt látja.
+//
+// A oneof garantálja hogy egyszerre csak egy parancs
+// lehet beállítva – bináris szinten csak az aktív mező
+// kerül szerializálásra.
+//
+// C#-ban: CommandEnvelope.CommandCase enum + a megfelelő property.
+// ─────────────────────────────────────────────
+
+message CommandEnvelope {
+    oneof command {
+        InferRequest        infer         = 1;
+        CancelInferRequest  cancel        = 2;
+        ShutdownRequest     shutdown      = 3;
+        LoadModelRequest    load_model    = 4;
+        UnloadModelRequest  unload_model  = 5;
+        ListModelsRequest   list_models   = 6;
+    }
+}

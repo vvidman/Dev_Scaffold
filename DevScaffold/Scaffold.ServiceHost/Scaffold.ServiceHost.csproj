@@ -1,16 +1,18 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
     <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Scaffold.Agent.Protocol\Scaffold.Agent.Protocol.csproj" />
-    <ProjectReference Include="..\Scaffold.Domain\Scaffold.Domain.csproj" />
     <ProjectReference Include="..\Scaffold.Application\Scaffold.Application.csproj" />
+    <ProjectReference Include="..\Scaffold.Domain\Scaffold.Domain.csproj" />
     <ProjectReference Include="..\Scaffold.Infrastructure.Inference\Scaffold.Infrastructure.Inference.csproj" />
     <ProjectReference Include="..\Scaffold.Infrastructure.StepConfig\Scaffold.Infrastructure.StepConfig.csproj" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.3" />
   </ItemGroup>
+
 </Project>

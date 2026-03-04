@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package scaffold.agent;
+
+option csharp_namespace = "Scaffold.Agent.Protocol";
+
+// ─────────────────────────────────────────────
+// INFERENCE KÉRÉS
+// A CLI küldi a command pipe-on.
+// ─────────────────────────────────────────────
+
+message InferRequest {
+    // Korrelációs azonosító – összeköti a kérést az event pipe-on
+    // érkező eseményekkel. A CLI generálja, GUID formátumban ajánlott.
+    string request_id = 1;
+
+    // A pipeline step azonosítója – pl. "task_breakdown"
+    // Naplózáshoz és státusz megjelenítéshez használja a ServiceHost.
+    string step_id = 2;
+
+    // A modell alias – a models.yaml-ban definiált név.
+    // pl. "qwen-coder-7b"
+    // A ServiceHost ebből oldja fel a tényleges GGUF path-t.
+    string model_alias = 3;
+
+    // Az agent system promptja – a step agent config yaml-ból jön.
+    // Ez mondja meg az AI-nak milyen szerepet töltsön be.
+    string system_prompt = 4;
+
+    // Az összeszerkesztett user input – az InputAssembler kimenete.
+    // Tartalmazza az input yaml-t és az összes path referencia tartalmát.
+    string user_input = 5;
+
+    // Maximális token szám a válaszban.
+    // 0 esetén a ServiceHost az alapértelmezett értéket használja.
+    uint32 max_tokens = 6;
+}
+
+// ─────────────────────────────────────────────
+// INFERENCE MEGSZAKÍTÁS
+// A CLI küldi ha a human megszakítja a futást (Ctrl+C).
+// ─────────────────────────────────────────────
+
+message CancelInferRequest {
+    // Melyik kérést kell megszakítani.
+    string request_id = 1;
+}
+
+// ─────────────────────────────────────────────
+// SHUTDOWN KÉRÉS
+// A CLI küldi ha le szeretné állítani a ServiceHost-ot.
+// ─────────────────────────────────────────────
+
+message ShutdownRequest {
+    // Ha true, az aktív inference-t is megszakítja azonnal.
+    // Ha false, megvárja az aktív inference befejezését majd leáll.
+    bool force = 1;
+}

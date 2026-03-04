@@ -3,9 +3,11 @@
     <File Path="../LICENSE" />
     <File Path="../README.md" />
   </Folder>
+  <Project Path="Scaffold.Agent.Protocol/Scaffold.Agent.Protocol.csproj" Id="6fc0f1fa-7b9f-4e08-8263-cf27b83255e8" />
   <Project Path="Scaffold.Application/Scaffold.Application.csproj" />
   <Project Path="Scaffold.CLI/Scaffold.CLI.csproj" />
   <Project Path="Scaffold.Domain/Scaffold.Domain.csproj" />
   <Project Path="Scaffold.Infrastructure.Inference/Scaffold.Infrastructure.Inference.csproj" />
   <Project Path="Scaffold.Infrastructure.StepConfig/Scaffold.Infrastructure.StepConfig.csproj" />
+  <Project Path="Scaffold.ServiceHost/Scaffold.ServiceHost.csproj" Id="08bd7679-0d88-4acb-9062-a03fc2fae6db" />
 </Solution>

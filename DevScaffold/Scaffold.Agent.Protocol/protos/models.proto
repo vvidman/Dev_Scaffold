@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package scaffold.agent;
+
+option csharp_namespace = "Scaffold.Agent.Protocol";
+
+// ─────────────────────────────────────────────
+// MODELL ELŐZETES BETÖLTÉS
+// Opcionális – lazy betöltés esetén nem kötelező hívni.
+// Hasznos ha előre tudod hogy szükséged lesz a modellre
+// és nem akarod hogy az első inference kérés várjon.
+// ─────────────────────────────────────────────
+
+message LoadModelRequest {
+    // Korrelációs azonosító – az event pipe-on
+    // ugyanezzel az id-val érkeznek a betöltési események.
+    string request_id = 1;
+
+    // A betöltendő modell aliasa – models.yaml-ban definiált.
+    string model_alias = 2;
+}
+
+// ─────────────────────────────────────────────
+// MODELL KIÜRÍTÉS
+// Felszabadítja a modellt a memóriából.
+// Aktív inference alatt nem hajtható végre –
+// a ServiceHost megvárja a befejezést.
+// ─────────────────────────────────────────────
+
+message UnloadModelRequest {
+    string request_id = 1;
+    string model_alias = 2;
+}
+
+// ─────────────────────────────────────────────
+// BETÖLTÖTT MODELLEK LEKÉRDEZÉSE
+// Csak a memóriában lévő modelleket adja vissza.
+// A human pontosan tudja milyen modellek érhetők el –
+// csak a betöltött állapot az érdekes.
+// ─────────────────────────────────────────────
+
+message ListModelsRequest {
+    string request_id = 1;
+}

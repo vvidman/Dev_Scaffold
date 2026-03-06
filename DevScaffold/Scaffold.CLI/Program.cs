@@ -17,146 +17,297 @@
  */
 
 using Microsoft.Extensions.DependencyInjection;
+using Scaffold.Agent.Protocol;
 using Scaffold.Application.Interfaces;
-using Scaffold.Application.Services;
 using Scaffold.CLI;
-using Scaffold.Infrastructure.Inference;
 using Scaffold.Infrastructure.StepConfig;
 
 // ─────────────────────────────────────────────
 // DevScaffold CLI
-// Használat:
-//   DevScaffold --pipeline <pipeline.yaml>
-//               --models <models.yaml>
-//               --input <input.yaml>
-//               --output <output mappa>
 //
-// Opcionális:
-//   --api-key <kulcs>   (API alapú engine esetén)
+// Használat:
+//   DevScaffold run  --config <step_agent_config.yaml>
+//                    --input  <input.yaml>
+//                    --model  <model_alias>
+//                    --host   <servicehost_binary_path>
+//                    --models <models.yaml>
+//                   [--output   <output mappa>]     (alapértelmezett: ./output)
+//                   [--pipe-name <név>]             (alapértelmezett: scaffold)
+//
+//   DevScaffold shutdown
+//                   [--pipe-name <név>]             (alapértelmezett: scaffold)
 // ─────────────────────────────────────────────
 
-var inputArgs = ParseArgs(args: Environment.GetCommandLineArgs()[1..]);
+var (mode, parsedArgs) = ParseArgs(Environment.GetCommandLineArgs()[1..]);
 
-if (inputArgs.ContainsKey("--help") || inputArgs.Count == 0)
+if (mode is "help" or "" || parsedArgs.ContainsKey("--help"))
 {
     PrintHelp();
     return 0;
 }
 
-if (!ValidateRequiredArgs(inputArgs))
-    return 1;
-
-// DI konténer összerakása
-var services = new ServiceCollection();
-
-services.AddSingleton<IPipelineConfigReader, YamlPipelineConfigReader>();
-services.AddSingleton<IModelRegistryReader, YamlModelRegistryReader>();
-services.AddSingleton<IStepAgentConfigReader, YamlStepAgentConfigReader>();
-services.AddSingleton<IInputAssembler, InputAssembler>();
-services.AddSingleton<IHumanValidationService, ConsoleHumanValidationService>();
-
-services.AddSingleton<IInferenceEngineFactory>(_ =>
-    new InferenceEngineFactory(
-        apiKey: inputArgs.GetValueOrDefault("--api-key")));
-
-services.AddSingleton<PipelineRunner>();
-
-var provider = services.BuildServiceProvider();
-var runner = provider.GetRequiredService<PipelineRunner>();
-
-// Pipeline futtatása
-try
+// Graceful shutdown – Ctrl+C esetén
+using var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) =>
 {
-    await runner.RunAsync(
-        pipelineYamlPath: inputArgs["--pipeline"],
-        modelsYamlPath: inputArgs["--models"],
-        inputYamlPath: inputArgs["--input"],
-        outputBasePath: inputArgs.GetValueOrDefault("--output") ?? "./output");
-
-    return 0;
-}
-catch (FileNotFoundException ex)
-{
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.Error.WriteLine($"[SCAFFOLD ERROR] Fájl nem található: {ex.Message}");
-    Console.ResetColor();
-    return 1;
-}
-catch (Scaffold.Application.ScaffoldInputValidationException ex)
-{
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.Error.WriteLine(ex.Message);
-    Console.ResetColor();
-    return 1;
-}
-catch (OperationCanceledException)
-{
+    e.Cancel = true;
     Console.WriteLine();
-    Console.WriteLine("[SCAFFOLD] Futás megszakítva.");
-    return 1;
-}
-catch (Exception ex)
+    Console.WriteLine("[SCAFFOLD] Megszakítás jelzése...");
+    cts.Cancel();
+};
+
+return mode switch
 {
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.Error.WriteLine($"[SCAFFOLD ERROR] Váratlan hiba: {ex.Message}");
-    Console.Error.WriteLine(ex.StackTrace);
-    Console.ResetColor();
-    return 1;
+    "run" => await RunAsync(parsedArgs, cts.Token),
+    "shutdown" => await ShutdownAsync(parsedArgs, cts.Token),
+    _ => UnknownMode(mode)
+};
+
+// ─────────────────────────────────────────────
+// run parancs
+// ─────────────────────────────────────────────
+
+async Task<int> RunAsync(
+    Dictionary<string, string> args,
+    CancellationToken cancellationToken)
+{
+    if (!ValidateRunArgs(args))
+        return 1;
+
+    var stepConfigPath = args["--config"];
+    var inputYamlPath  = args["--input"];
+    var modelAlias     = args["--model"];
+    var serviceHostPath = args["--host"];
+    var modelsYamlPath  = args["--models"];
+    var outputBasePath  = args.GetValueOrDefault("--output", "./output");
+    var pipeName        = args.GetValueOrDefault("--pipe-name", "scaffold");
+
+    // ─────────────────────────────────────────────
+    // DI konténer
+    // ─────────────────────────────────────────────
+
+    var services = new ServiceCollection();
+    services.AddSingleton<IStepAgentConfigReader, YamlStepAgentConfigReader>();
+    services.AddSingleton<IInputAssembler, InputAssembler>();
+    services.AddSingleton<IHumanValidationService, ConsoleHumanValidationService>();
+    var provider = services.BuildServiceProvider();
+
+    // ─────────────────────────────────────────────
+    // ServiceHost indítás
+    // ─────────────────────────────────────────────
+
+    var launcher = new ServiceHostLauncher(
+        serviceHostPath: serviceHostPath,
+        modelsYamlPath: modelsYamlPath,
+        outputBasePath: outputBasePath,
+        pipeName: pipeName);
+
+    PipeClient pipeClient;
+
+    try
+    {
+        pipeClient = await launcher.EnsureRunningAsync(cancellationToken);
+    }
+    catch (InvalidOperationException ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Error.WriteLine(ex.Message);
+        Console.ResetColor();
+        return 1;
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine("[SCAFFOLD] Megszakítva.");
+        return 1;
+    }
+
+    // ─────────────────────────────────────────────
+    // Lépés futtatás
+    // ─────────────────────────────────────────────
+
+    await using (pipeClient)
+    {
+        await using var session = new ScaffoldSession(
+            pipeClient,
+            provider.GetRequiredService<IStepAgentConfigReader>(),
+            provider.GetRequiredService<IInputAssembler>(),
+            provider.GetRequiredService<IHumanValidationService>(),
+            stepConfigPath: stepConfigPath,
+            inputYamlPath: inputYamlPath,
+            modelAlias: modelAlias);
+
+        try
+        {
+            await session.RunAsync(cancellationToken);
+            return 0;
+        }
+        catch (Scaffold.Application.ScaffoldInputValidationException ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.Error.WriteLine(ex.Message);
+            Console.ResetColor();
+            return 1;
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine("[SCAFFOLD] Futás megszakítva.");
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.Error.WriteLine($"[SCAFFOLD ERROR] Váratlan hiba: {ex.Message}");
+            Console.Error.WriteLine(ex.StackTrace);
+            Console.ResetColor();
+            return 1;
+        }
+    }
+}
+
+// ─────────────────────────────────────────────
+// shutdown parancs
+// ─────────────────────────────────────────────
+
+async Task<int> ShutdownAsync(
+    Dictionary<string, string> args,
+    CancellationToken cancellationToken)
+{
+    var pipeName = args.GetValueOrDefault("--pipe-name", "scaffold");
+
+    // Pipe existence check – ha nem él, a ServiceHost nem fut
+    if (!File.Exists($@"\\.\pipe\{pipeName}-events"))
+    {
+        Console.WriteLine("[SCAFFOLD] ServiceHost nem fut.");
+        return 0;
+    }
+
+    var pipeClient = new PipeClient(pipeName);
+
+    await using (pipeClient)
+    {
+        // Csatlakozás és ready várakozás (ServiceHost session loop fogadja)
+        try
+        {
+            await pipeClient.ConnectAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[SCAFFOLD ERROR] Pipe csatlakozás sikertelen: {ex.Message}");
+            return 1;
+        }
+
+        var isReady = await pipeClient.WaitForReadyAsync(
+            TimeSpan.FromSeconds(10),
+            cancellationToken);
+
+        if (!isReady)
+        {
+            Console.Error.WriteLine("[SCAFFOLD ERROR] ServiceHost nem válaszolt.");
+            return 1;
+        }
+
+        // ServiceShuttingDownEvent várakozás
+        var shuttingDownTcs = new TaskCompletionSource();
+        pipeClient.EventReceived += evt =>
+        {
+            if (evt.EventCase == EventEnvelope.EventOneofCase.ServiceShuttingDown)
+                shuttingDownTcs.TrySetResult();
+            return Task.CompletedTask;
+        };
+
+        await pipeClient.StartAsync(cancellationToken);
+
+        await pipeClient.SendAsync(
+            new CommandEnvelope { Shutdown = new ShutdownRequest() },
+            cancellationToken);
+
+        Console.WriteLine("[SCAFFOLD] Leállítás elküldve. Várakozás visszaigazolásra...");
+
+        // Max 5 másodpercet várunk a visszaigazolásra
+        await Task.WhenAny(
+            shuttingDownTcs.Task,
+            Task.Delay(TimeSpan.FromSeconds(5), cancellationToken));
+
+        if (shuttingDownTcs.Task.IsCompleted)
+            Console.WriteLine("[SCAFFOLD] ServiceHost leállítva.");
+        else
+            Console.WriteLine("[SCAFFOLD] Leállítás elküldve (visszaigazolás nem érkezett).");
+
+        return 0;
+    }
 }
 
 // ─────────────────────────────────────────────
 // Segédfüggvények
 // ─────────────────────────────────────────────
 
-static Dictionary<string, string> ParseArgs(string[] args)
+static (string mode, Dictionary<string, string> args) ParseArgs(string[] rawArgs)
 {
-    var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    if (rawArgs.Length == 0)
+        return ("help", new Dictionary<string, string>());
 
-    for (int i = 0; i < args.Length; i++)
+    var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    var mode = rawArgs[0];
+
+    for (int i = 1; i < rawArgs.Length; i++)
     {
-        if (args[i].StartsWith("--"))
-        {
-            var value = (i + 1 < args.Length && !args[i + 1].StartsWith("--"))
-                ? args[++i]
-                : "true";
-            result[args[i]] = value;
-        }
+        if (!rawArgs[i].StartsWith("--"))
+            continue;
+
+        var key = rawArgs[i];
+        var value = (i + 1 < rawArgs.Length && !rawArgs[i + 1].StartsWith("--"))
+            ? rawArgs[++i]
+            : "true";
+
+        result[key] = value;
     }
 
-    return result;
+    return (mode, result);
 }
 
-static bool ValidateRequiredArgs(Dictionary<string, string> args)
+static bool ValidateRunArgs(Dictionary<string, string> args)
 {
-    var required = new[] { "--pipeline", "--models", "--input" };
+    var required = new[] { "--config", "--input", "--model", "--host", "--models" };
     var missing = required.Where(r => !args.ContainsKey(r)).ToList();
 
     if (missing.Count == 0) return true;
 
     Console.ForegroundColor = ConsoleColor.Red;
-    Console.Error.WriteLine($"[SCAFFOLD ERROR] Hiányzó argumentumok: {string.Join(", ", missing)}");
+    Console.Error.WriteLine(
+        $"[SCAFFOLD ERROR] Hiányzó argumentumok: {string.Join(", ", missing)}");
     Console.ResetColor();
     Console.WriteLine();
     PrintHelp();
     return false;
 }
 
+static int UnknownMode(string mode)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.Error.WriteLine($"[SCAFFOLD ERROR] Ismeretlen parancs: {mode}");
+    Console.ResetColor();
+    Console.WriteLine();
+    PrintHelp();
+    return 1;
+}
+
 static void PrintHelp()
 {
     Console.WriteLine("""
+
         DevScaffold – Scaffold Protocol CLI
 
         Használat:
-          DevScaffold --pipeline <pipeline.yaml>
-                      --models   <models.yaml>
-                      --input    <input.yaml>
-                     [--output   <output mappa>]
-                     [--api-key  <kulcs>]
+          DevScaffold run  --config <step_agent_config.yaml>
+                           --input  <input.yaml>
+                           --model  <model_alias>
+                           --host   <servicehost_binary_path>
+                           --models <models.yaml>
+                          [--output   <output mappa>]
+                          [--pipe-name <név>]
 
-        Példa:
-          DevScaffold --pipeline ./scaffold/pipeline.yaml
-                      --models   ./scaffold/models.yaml
-                      --input    ./scaffold/inputs/01_task_definition_input.yaml
-                      --output   ./scaffold/output
+          DevScaffold shutdown
+                          [--pipe-name <név>]
+
         """);
 }

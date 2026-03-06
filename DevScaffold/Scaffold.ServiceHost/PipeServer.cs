@@ -64,27 +64,57 @@ public class PipeServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// Elindítja a PipeServer-t és blokkolva fut amíg shutdown nem érkezik.
+    /// Elindítja a PipeServer-t. Minden CLI session után várakozik a következőre,
+    /// amíg ShutdownToken nem triggerelődik.
     /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        // Linked token: service szintű cancel VAGY shutdown parancs
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _dispatcher.ShutdownToken);
 
         var token = linkedCts.Token;
 
-        // 1. Event pipe – CLI-nek csatlakoznia kell mielőtt ready-t küldünk
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await RunSingleSessionAsync(token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
+            if (token.IsCancellationRequested) break;
+
+            // CLI kilépett, de ServiceHost fut tovább – következő CLI várása
+            Console.WriteLine("[ServiceHost] Session lezárva. Következő CLI kapcsolat előkészítése...");
+
+            try
+            {
+                await _eventPublisher.ResetForNewConnectionAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Egyetlen CLI session teljes életciklusa:
+    /// event pipe → ready event → command pipe → command loop.
+    /// </summary>
+    private async Task RunSingleSessionAsync(CancellationToken token)
+    {
         Console.WriteLine("[ServiceHost] Event pipe megnyitása...");
         await _eventPublisher.WaitForConnectionAsync(token);
         Console.WriteLine("[ServiceHost] Event pipe: CLI csatlakozott.");
 
-        // 2. ServiceReadyEvent – ez a CLI ready jele
         await _eventPublisher.PublishServiceReadyAsync(_version, token);
         Console.WriteLine($"[ServiceHost] Ready. Verzió: {_version}");
 
-        // 3. Command pipe megnyitása
         Console.WriteLine("[ServiceHost] Command pipe megnyitása...");
         _commandPipe = new NamedPipeServerStream(
             pipeName: $"{_pipeName}-commands",
@@ -96,8 +126,11 @@ public class PipeServer : IAsyncDisposable
         await _commandPipe.WaitForConnectionAsync(token);
         Console.WriteLine("[ServiceHost] Command pipe: CLI csatlakozott.");
 
-        // 4. Command loop
         await RunCommandLoopAsync(token);
+
+        // Command pipe cleanup – következő sessionhöz új kell
+        await _commandPipe.DisposeAsync();
+        _commandPipe = null;
     }
 
     /// <summary>

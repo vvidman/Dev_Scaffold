@@ -28,9 +28,14 @@ namespace Scaffold.CLI;
 /// </summary>
 public class ConsoleHumanValidationService : IHumanValidationService
 {
-    public async Task<ValidationDecision> ValidateAsync(
-        string stepId,
-        string outputFilePath)
+    public Task<ValidationDecision> ValidateAsync(
+    string stepId,
+    string outputFilePath)
+    {
+        return Task.FromResult(ValidateSync(stepId, outputFilePath));
+    }
+
+    private static ValidationDecision ValidateSync(string stepId, string outputFilePath)
     {
         Console.WriteLine("─────────────────────────────────────────────────");
         Console.WriteLine($"[SCAFFOLD] Validáció szükséges: {stepId}");

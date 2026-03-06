@@ -30,16 +30,25 @@ namespace Scaffold.ServiceHost;
 /// kerül a pipe-ra – párhuzamos inference progress és modell események
 /// esetén sem keverednek az üzenetek.
 /// </summary>
-public class EventPublisher(string pipeName) : IAsyncDisposable
+public class EventPublisher : IAsyncDisposable
 {
-    private readonly NamedPipeServerStream _pipe = new(
-            pipeName: $"{pipeName}-events",
-            direction: PipeDirection.Out,
-            maxNumberOfServerInstances: 1,
-            transmissionMode: PipeTransmissionMode.Byte,
-            options: PipeOptions.Asynchronous);
+    private readonly string _pipeName;
+    private NamedPipeServerStream _pipe;          // nem readonly
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _disposed;
+
+    public EventPublisher(string pipeName)
+    {
+        _pipeName = pipeName;
+        _pipe = CreatePipe();
+    }
+
+    private NamedPipeServerStream CreatePipe() => new(
+        pipeName: $"{_pipeName}-events",
+        direction: PipeDirection.Out,
+        maxNumberOfServerInstances: 1,
+        transmissionMode: PipeTransmissionMode.Byte,
+        options: PipeOptions.Asynchronous);
 
     /// <summary>
     /// Megvárja hogy a CLI kliens csatlakozzon az event pipe-ra.
@@ -48,6 +57,26 @@ public class EventPublisher(string pipeName) : IAsyncDisposable
     public async Task WaitForConnectionAsync(CancellationToken cancellationToken = default)
     {
         await _pipe.WaitForConnectionAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Az előző CLI session pipe-ját elveti és újat nyit.
+    /// A PipeServer hívja mielőtt a következő CLI kapcsolatot várja.
+    /// </summary>
+    public async Task ResetForNewConnectionAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            await _pipe.DisposeAsync();
+            _pipe = CreatePipe();
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     /// <summary>
@@ -232,6 +261,7 @@ public class EventPublisher(string pipeName) : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
         _lock.Dispose();
-        await _pipe.DisposeAsync();
+        try { await _pipe.DisposeAsync(); }
+        catch (IOException) { /* már bontott pipe – normál eset */ }
     }
 }

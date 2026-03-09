@@ -16,36 +16,41 @@
 
  */
 
-using LLama;
-using LLama.Common;
 using Scaffold.Agent.Protocol;
 using Scaffold.Domain.Models;
+using Scaffold.ServiceHost.InferenceImpl;
 
 namespace Scaffold.ServiceHost;
 
 /// <summary>
-/// Lazy modell betöltés és cache kezelés.
+/// Lazy backend betöltés és cache kezelés.
 ///
-/// Az első inference kéréskor tölti be a modellt,
+/// Az első inference kéréskor tölti be / inicializálja a backendet,
 /// majd a memóriában tartja a ServiceHost élettartama alatt.
-/// Shutdown-kor felszabadítja az összes betöltött modellt.
+/// Shutdown-kor felszabadítja az összes betöltött backendet.
+///
+/// Két backend típust kezel:
+/// - LlamaInferenceBackend: .gguf path esetén, betöltési idő van
+/// - ApiInferenceBackend:   https:// URL esetén, azonnali init
 ///
 /// Thread-safe: SemaphoreSlim per-alias lockkal biztosítja hogy
-/// ugyanazt a modellt egyszerre csak egyszer töltjük be,
+/// ugyanazt a backendet egyszerre csak egyszer inicializálja,
 /// még párhuzamos kérések esetén sem.
 /// </summary>
 public class ModelCache : IAsyncDisposable
 {
     private readonly ModelRegistryConfig _registry;
 
-    // Betöltött modellek cache-e – alias → LLamaWeights
-    private readonly Dictionary<string, LLamaWeights> _loadedModels = new();
+    // Megosztott HttpClient az összes ApiInferenceBackend számára
+    private readonly HttpClient _httpClient = new();
+
+    // Betöltött backendek cache-e – alias → IInferenceBackend
+    private readonly Dictionary<string, IInferenceBackend> _loadedBackends = new();
 
     // Per-alias lock – csak az érintett alias töltése blokkolódik
-    // nem az összes modell művelete
     private readonly Dictionary<string, SemaphoreSlim> _loadLocks = new();
 
-    // Globális lock a _loadedModels és _loadLocks dictionary-k védelméhez
+    // Globális lock a dictionary-k védelméhez
     private readonly SemaphoreSlim _dictionaryLock = new(1, 1);
 
     private bool _disposed;
@@ -60,26 +65,23 @@ public class ModelCache : IAsyncDisposable
     }
 
     /// <summary>
-    /// Visszaadja a betöltött LLamaWeights-et az alias alapján.
-    /// Ha még nincs betöltve, most tölti be (lazy).
+    /// Visszaadja a betöltött backendet az alias alapján.
+    /// Ha még nincs betöltve/inicializálva, most csinálja (lazy).
     /// </summary>
-    /// <param name="requestId">Korrelációs azonosító – az eseményekhez</param>
-    /// <param name="alias">Modell alias a models.yaml-ból</param>
-    public async Task<LLamaWeights> GetOrLoadAsync(
+    internal async Task<IInferenceBackend> GetOrLoadAsync(
         string requestId,
         string alias,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // Gyors ellenőrzés lock nélkül – ha már betöltött, azonnal visszaadjuk
+        // Gyors ellenőrzés – ha már betöltött, azonnal visszaadjuk
         await _dictionaryLock.WaitAsync(cancellationToken);
         try
         {
-            if (_loadedModels.TryGetValue(alias, out var cached))
+            if (_loadedBackends.TryGetValue(alias, out var cached))
                 return cached;
 
-            // Per-alias lock létrehozása ha még nem létezik
             if (!_loadLocks.ContainsKey(alias))
                 _loadLocks[alias] = new SemaphoreSlim(1, 1);
         }
@@ -93,11 +95,11 @@ public class ModelCache : IAsyncDisposable
         await aliasLock.WaitAsync(cancellationToken);
         try
         {
-            // Double-check: lehet hogy amíg vártunk a lockra, már betöltötte valaki
+            // Double-check: lehet hogy amíg vártunk, már betöltötte valaki
             await _dictionaryLock.WaitAsync(cancellationToken);
             try
             {
-                if (_loadedModels.TryGetValue(alias, out var cached))
+                if (_loadedBackends.TryGetValue(alias, out var cached))
                     return cached;
             }
             finally
@@ -105,8 +107,7 @@ public class ModelCache : IAsyncDisposable
                 _dictionaryLock.Release();
             }
 
-            // Ténylegesen betöltjük a modellt
-            return await LoadModelAsync(requestId, alias, cancellationToken);
+            return await LoadBackendAsync(requestId, alias, cancellationToken);
         }
         finally
         {
@@ -115,7 +116,7 @@ public class ModelCache : IAsyncDisposable
     }
 
     /// <summary>
-    /// Explicit modell betöltés – LoadModelRequest hatására.
+    /// Explicit backend betöltés – LoadModelRequest hatására.
     /// Ha már betöltött, no-op.
     /// </summary>
     public async Task LoadAsync(
@@ -127,7 +128,7 @@ public class ModelCache : IAsyncDisposable
     }
 
     /// <summary>
-    /// Modell kiürítése a memóriából.
+    /// Backend kiürítése a memóriából.
     /// </summary>
     public async Task UnloadAsync(
         string requestId,
@@ -139,11 +140,11 @@ public class ModelCache : IAsyncDisposable
         await _dictionaryLock.WaitAsync(cancellationToken);
         try
         {
-            if (!_loadedModels.TryGetValue(alias, out var model))
+            if (!_loadedBackends.TryGetValue(alias, out var backend))
                 return;
 
-            model.Dispose();
-            _loadedModels.Remove(alias);
+            await backend.DisposeAsync();
+            _loadedBackends.Remove(alias);
         }
         finally
         {
@@ -155,7 +156,7 @@ public class ModelCache : IAsyncDisposable
     }
 
     /// <summary>
-    /// Visszaadja a betöltött modellek alias listáját.
+    /// Visszaadja a betöltött backendek alias listáját.
     /// </summary>
     public async Task<IReadOnlyList<string>> GetLoadedAliasesAsync(
         CancellationToken cancellationToken = default)
@@ -163,7 +164,7 @@ public class ModelCache : IAsyncDisposable
         await _dictionaryLock.WaitAsync(cancellationToken);
         try
         {
-            return _loadedModels.Keys.ToList();
+            return _loadedBackends.Keys.ToList();
         }
         finally
         {
@@ -171,75 +172,57 @@ public class ModelCache : IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// Visszaadja a ModelParams-ot egy aliashoz.
-    /// Az InferenceWorker használja context létrehozáshoz.
-    /// </summary>
-    public ModelConfig GetModelConfig(string alias) =>
-        _registry.Resolve(alias);
-
     // ─────────────────────────────────────────────
     // Privát implementáció
     // ─────────────────────────────────────────────
 
-    private async Task<LLamaWeights> LoadModelAsync(
+    private async Task<IInferenceBackend> LoadBackendAsync(
         string requestId,
         string alias,
         CancellationToken cancellationToken)
     {
-        var modelConfig = _registry.Resolve(alias);
+        var config = _registry.Resolve(alias);
 
-        if (!File.Exists(modelConfig.Path))
-            throw new FileNotFoundException(
-                $"Modell fájl nem található: {modelConfig.Path}");
-
-        // Betöltés kezdete – esemény küldése
         if (ModelStatusChanged is not null)
             await ModelStatusChanged(alias, ModelStatus.Loading,
-                "Modell betöltése folyamatban...");
+                "Backend inicializálása...");
 
         try
         {
-            var parameters = new ModelParams(modelConfig.Path)
-            {
-                ContextSize = (uint)modelConfig.ContextSize,
-                GpuLayerCount = modelConfig.GpuLayers
-            };
+            IInferenceBackend backend = IsApiEndpoint(config.Path)
+                ? new ApiInferenceBackend(config, _httpClient)
+                : await LlamaInferenceBackend.LoadAsync(config, cancellationToken);
 
-            // LLamaWeights.LoadFromFile szinkron és CPU-intenzív –
-            // Task.Run-ba tesszük hogy ne blokkoljuk az async szálat
-            var weights = await Task.Run(
-                () => LLamaWeights.LoadFromFile(parameters),
-                cancellationToken);
-
-            // Cache-be tesszük
             await _dictionaryLock.WaitAsync(cancellationToken);
             try
             {
-                _loadedModels[alias] = weights;
+                _loadedBackends[alias] = backend;
             }
             finally
             {
                 _dictionaryLock.Release();
             }
 
-            // Betöltés kész – esemény küldése
             if (ModelStatusChanged is not null)
                 await ModelStatusChanged(alias, ModelStatus.Loaded,
-                    $"Modell betöltve: {alias}");
+                    IsApiEndpoint(config.Path)
+                        ? $"API backend kész: {config.Path}"
+                        : $"Modell betöltve: {alias}");
 
-            return weights;
+            return backend;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Betöltés hiba – esemény küldése
             if (ModelStatusChanged is not null)
                 await ModelStatusChanged(alias, ModelStatus.Failed,
-                    $"Modell betöltési hiba: {ex.Message}");
-
+                    $"Backend inicializálási hiba: {ex.Message}");
             throw;
         }
     }
+
+    private static bool IsApiEndpoint(string path) =>
+        path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
 
     public async ValueTask DisposeAsync()
     {
@@ -249,10 +232,10 @@ public class ModelCache : IAsyncDisposable
         await _dictionaryLock.WaitAsync();
         try
         {
-            foreach (var model in _loadedModels.Values)
-                model.Dispose();
+            foreach (var backend in _loadedBackends.Values)
+                await backend.DisposeAsync();
 
-            _loadedModels.Clear();
+            _loadedBackends.Clear();
         }
         finally
         {
@@ -263,5 +246,7 @@ public class ModelCache : IAsyncDisposable
 
         foreach (var l in _loadLocks.Values)
             l.Dispose();
+
+        _httpClient.Dispose();
     }
 }

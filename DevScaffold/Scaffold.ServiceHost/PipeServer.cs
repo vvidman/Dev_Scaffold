@@ -29,17 +29,19 @@ namespace Scaffold.ServiceHost;
 /// - command pipe: CLI → ServiceHost (olvasás)
 /// - event pipe:   ServiceHost → CLI (írás, az EventPublisher kezeli)
 ///
-/// Indulási sorrend:
+/// Multi-session: minden CLI hívás egy session. A ServiceHost
+/// a session lezárása után új CLI kapcsolatot vár, amíg
+/// ShutdownToken nem triggerelődik.
+///
+/// Session indulási sorrend:
 /// 1. Event pipe nyitása – CLI csatlakozás megvárása
 /// 2. ServiceReadyEvent küldése
 /// 3. Command pipe nyitása – CLI csatlakozás megvárása
-/// 4. Command loop indítása
+/// 4. Command loop – CLI kilép → pipe lezárul → session vége
 ///
-/// Leállási sorrend:
-/// 1. ShutdownToken triggerelődik (CommandDispatcher-től)
-/// 2. Command loop leáll
-/// 3. ServiceShuttingDownEvent már el lett küldve (CommandDispatcher küldte)
-/// 4. Pipe-ok lezárása
+/// Leállítás:
+/// - ShutdownRequest → CommandDispatcher canceli ShutdownToken-t → loop kilép
+/// - Ctrl+C / SIGTERM → service CancellationToken cancellódik → loop kilép
 /// </summary>
 public class PipeServer : IAsyncDisposable
 {
@@ -64,8 +66,8 @@ public class PipeServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// Elindítja a PipeServer-t. Minden CLI session után várakozik a következőre,
-    /// amíg ShutdownToken nem triggerelődik.
+    /// Elindítja a PipeServer-t. Minden CLI session után
+    /// várakozik a következőre, amíg ShutdownToken nem triggerelődik.
     /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
@@ -88,8 +90,9 @@ public class PipeServer : IAsyncDisposable
 
             if (token.IsCancellationRequested) break;
 
-            // CLI kilépett, de ServiceHost fut tovább – következő CLI várása
-            Console.WriteLine("[ServiceHost] Session lezárva. Következő CLI kapcsolat előkészítése...");
+            // CLI kilépett, ServiceHost fut tovább – következő session előkészítése
+            Console.WriteLine(
+                "[ServiceHost] Session lezárva. Következő CLI kapcsolat előkészítése...");
 
             try
             {
@@ -108,13 +111,16 @@ public class PipeServer : IAsyncDisposable
     /// </summary>
     private async Task RunSingleSessionAsync(CancellationToken token)
     {
+        // 1. Event pipe – CLI csatlakozás megvárása
         Console.WriteLine("[ServiceHost] Event pipe megnyitása...");
         await _eventPublisher.WaitForConnectionAsync(token);
         Console.WriteLine("[ServiceHost] Event pipe: CLI csatlakozott.");
 
+        // 2. ServiceReadyEvent – ez a CLI ready jele
         await _eventPublisher.PublishServiceReadyAsync(_version, token);
         Console.WriteLine($"[ServiceHost] Ready. Verzió: {_version}");
 
+        // 3. Command pipe megnyitása
         Console.WriteLine("[ServiceHost] Command pipe megnyitása...");
         _commandPipe = new NamedPipeServerStream(
             pipeName: $"{_pipeName}-commands",
@@ -126,9 +132,10 @@ public class PipeServer : IAsyncDisposable
         await _commandPipe.WaitForConnectionAsync(token);
         Console.WriteLine("[ServiceHost] Command pipe: CLI csatlakozott.");
 
+        // 4. Command loop
         await RunCommandLoopAsync(token);
 
-        // Command pipe cleanup – következő sessionhöz új kell
+        // Cleanup – következő sessionhöz új command pipe kell
         await _commandPipe.DisposeAsync();
         _commandPipe = null;
     }
@@ -149,8 +156,6 @@ public class PipeServer : IAsyncDisposable
 
                 try
                 {
-                    // ParseDelimitedFrom – varint hossz prefix alapján olvassa az üzenetet
-                    // Blokkol amíg nem érkezik üzenet vagy a pipe le nem zárul
                     envelope = CommandEnvelope.Parser.ParseDelimitedFrom(_commandPipe);
                 }
                 catch (InvalidProtocolBufferException ex)
@@ -163,16 +168,9 @@ public class PipeServer : IAsyncDisposable
                 }
                 catch (IOException ioe)
                 {
-                    if (ioe is EndOfStreamException)
-                    {
-                        // CLI lezárta a pipe-ot
-                        Console.WriteLine("[ServiceHost] Command pipe: stream vége.");
-                    }
-                    else
-                    {
-                        // Pipe lezárult – CLI kilépett
-                        Console.WriteLine("[ServiceHost] Command pipe lezárult. CLI kilépett.");
-                    }
+                    Console.WriteLine(ioe is EndOfStreamException
+                        ? "[ServiceHost] Command pipe: stream vége."
+                        : "[ServiceHost] Command pipe lezárult. CLI kilépett.");
                     break;
                 }
 
@@ -189,10 +187,7 @@ public class PipeServer : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException)
-        {
-            // Normál leállás – ShutdownToken vagy service cancel
-        }
+        catch (OperationCanceledException) { }
 
         Console.WriteLine("[ServiceHost] Command loop leállt.");
     }

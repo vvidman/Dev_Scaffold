@@ -83,7 +83,7 @@ public class ScaffoldSession : IAsyncDisposable
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
         var agentConfig = _stepAgentConfigReader.Load(_stepConfigPath);
-        var assembledInput = _inputAssembler.Assemble(_inputYamlPath);
+        var assembledInput = _inputAssembler.Assemble(_inputYamlPath, agentConfig.Step);
 
         Console.WriteLine($"[SCAFFOLD] Lépés: {agentConfig.Step}");
         Console.WriteLine();

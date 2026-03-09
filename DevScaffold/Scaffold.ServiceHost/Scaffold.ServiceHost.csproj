@@ -8,10 +8,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="LLamaSharp" Version="0.26.0" />
+    <PackageReference Include="LLamaSharp.Backend.Cpu" Version="0.26.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Scaffold.Agent.Protocol\Scaffold.Agent.Protocol.csproj" />
     <ProjectReference Include="..\Scaffold.Application\Scaffold.Application.csproj" />
     <ProjectReference Include="..\Scaffold.Domain\Scaffold.Domain.csproj" />
-    <ProjectReference Include="..\Scaffold.Infrastructure.Inference\Scaffold.Infrastructure.Inference.csproj" />
     <ProjectReference Include="..\Scaffold.Infrastructure.StepConfig\Scaffold.Infrastructure.StepConfig.csproj" />
   </ItemGroup>
 

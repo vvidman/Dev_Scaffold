@@ -31,6 +31,10 @@ namespace Scaffold.ServiceHost;
 /// - LoadModelRequest    → ModelCache
 /// - UnloadModelRequest  → ModelCache
 /// - ListModelsRequest   → ModelCache + EventPublisher
+///
+/// Shutdown szemantika (ADR Protocol #6):
+/// - force = false: megvárja az aktív inference befejezését, majd leáll
+/// - force = true:  azonnal megszakítja az inference-t és leáll
 /// </summary>
 public class CommandDispatcher
 {
@@ -108,9 +112,8 @@ public class CommandDispatcher
     {
         try
         {
-            // Fire and forget jelleggel indítjuk –
-            // az InferenceWorker saját maga küldi az eseményeket
-            // és nem blokkoljuk a command pipe olvasását
+            // Fire and forget – nem blokkoljuk a command pipe olvasását
+            // Az InferenceWorker saját maga küldi az eseményeket
             _ = Task.Run(
                 async () => await _inferenceWorker.RunAsync(request, cancellationToken),
                 cancellationToken);
@@ -127,8 +130,6 @@ public class CommandDispatcher
 
     private void HandleCancel(CancelInferRequest request)
     {
-        // CancelInferRequest-ben a request_id azonosítja a kérést –
-        // az InferenceWorker az aktív kérést szakítja meg
         // TODO [SCAFFOLD]: per-request cancel ha több párhuzamos inference lesz
         _inferenceWorker.Cancel();
     }
@@ -137,15 +138,21 @@ public class CommandDispatcher
         ShutdownRequest request,
         CancellationToken cancellationToken)
     {
-        // Értesítjük a CLI-t hogy leállás következik
         await _eventPublisher.PublishServiceShuttingDownAsync(
             request.Force,
             cancellationToken);
 
         if (request.Force)
+        {
+            // Azonnali leállás – aktív inference megszakítása
             _inferenceWorker.Cancel();
+        }
+        else
+        {
+            // Graceful leállás – megvárjuk az aktív inference befejezését
+            await _inferenceWorker.WaitForCompletionAsync(cancellationToken);
+        }
 
-        // Shutdown jelzése a PipeServer felé
         _shutdownCts.Cancel();
     }
 
@@ -164,7 +171,7 @@ public class CommandDispatcher
         {
             await _eventPublisher.PublishServiceErrorAsync(
                 errorCode: "MODEL_LOAD_FAILED",
-                errorMessage: $"Modell betöltési hiba ({request.ModelAlias}): {ex.Message}",
+                errorMessage: $"Backend inicializálási hiba ({request.ModelAlias}): {ex.Message}",
                 ct: cancellationToken);
         }
     }
@@ -184,7 +191,7 @@ public class CommandDispatcher
         {
             await _eventPublisher.PublishServiceErrorAsync(
                 errorCode: "MODEL_UNLOAD_FAILED",
-                errorMessage: $"Modell kiürítési hiba ({request.ModelAlias}): {ex.Message}",
+                errorMessage: $"Backend kiürítési hiba ({request.ModelAlias}): {ex.Message}",
                 ct: cancellationToken);
         }
     }

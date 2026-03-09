@@ -35,5 +35,5 @@ public interface IInputAssembler
     /// <exception cref="ScaffoldInputValidationException">
     /// Ha bármely path referencia nem található.
     /// </exception>
-    string Assemble(string inputYamlPath);
+    string Assemble(string inputYamlPath, string stepId);
 }

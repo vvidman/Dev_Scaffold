@@ -24,8 +24,8 @@ using Scaffold.ServiceHost;
 // Scaffold ServiceHost
 //
 // Használat (a CLI indítja, nem kézzel):
-//   Scaffold.ServiceHost --models <models.yaml>
-//                        --output <output mappa>
+//   Scaffold.ServiceHost --models    <models.yaml>
+//                        --output    <output mappa>
 //                        --pipe-name <pipe név>
 //
 // Minden paramétert a CLI ad át indításkor.
@@ -41,10 +41,10 @@ var outputBasePath = inputArgs["--output"];
 var pipeName = inputArgs["--pipe-name"];
 var version = "1.0.0";
 
-Console.WriteLine($"[ServiceHost] Indítás...");
+Console.WriteLine("[ServiceHost] Indítás...");
 Console.WriteLine($"[ServiceHost] Pipe neve: {pipeName}");
-Console.WriteLine($"[ServiceHost] Models: {modelsYamlPath}");
-Console.WriteLine($"[ServiceHost] Output: {outputBasePath}");
+Console.WriteLine($"[ServiceHost] Models:    {modelsYamlPath}");
+Console.WriteLine($"[ServiceHost] Output:    {outputBasePath}");
 Console.WriteLine();
 
 // Graceful shutdown – Ctrl+C vagy SIGTERM esetén
@@ -61,39 +61,40 @@ AppDomain.CurrentDomain.ProcessExit += (_, _) => cts.Cancel();
 // Komponensek összerakása
 // ─────────────────────────────────────────────
 
-// Models registry betöltése
 ModelRegistryConfig registry;
 try
 {
     var registryReader = new YamlModelRegistryReader();
     registry = registryReader.Load(modelsYamlPath);
-    Console.WriteLine($"[ServiceHost] Modell registry betöltve. " +
-                      $"Elérhető aliasok: {string.Join(", ", registry.Models.Keys)}");
+    Console.WriteLine(
+        $"[ServiceHost] Modell registry betöltve. " +
+        $"Elérhető aliasok: {string.Join(", ", registry.Models.Keys)}");
 }
 catch (Exception ex)
 {
-    Console.Error.WriteLine($"[ServiceHost ERROR] Models registry betöltési hiba: {ex.Message}");
+    Console.Error.WriteLine(
+        $"[ServiceHost ERROR] Models registry betöltési hiba: {ex.Message}");
     return 1;
 }
 
 // EventPublisher – event pipe írás
 await using var eventPublisher = new EventPublisher(pipeName);
 
-// ModelCache – lazy modell betöltés
+// ModelCache – lazy backend betöltés (LLamaSharp vagy API)
 await using var modelCache = new ModelCache(registry);
 
 // ModelCache eseményeket bekötjük az EventPublisher-be
 modelCache.ModelStatusChanged += async (alias, status, message) =>
 {
     await eventPublisher.PublishModelStatusChangedAsync(
-        requestId: string.Empty,  // lifecycle eseménynél nincs request kontextus
+        requestId: string.Empty,
         modelAlias: alias,
         status: status,
         message: message,
         ct: cts.Token);
 };
 
-// InferenceWorker – inference futtatás
+// InferenceWorker – inference futtatás backend-agnosztikusan
 var inferenceWorker = new InferenceWorker(
     modelCache,
     eventPublisher,
@@ -105,7 +106,7 @@ var dispatcher = new CommandDispatcher(
     modelCache,
     eventPublisher);
 
-// PipeServer – pipe lifecycle
+// PipeServer – pipe lifecycle + session loop
 await using var pipeServer = new PipeServer(
     pipeName,
     dispatcher,

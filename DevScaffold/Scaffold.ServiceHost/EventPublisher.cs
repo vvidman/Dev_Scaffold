@@ -29,11 +29,14 @@ namespace Scaffold.ServiceHost;
 /// Thread-safe: a _lock biztosítja hogy egyszerre csak egy esemény
 /// kerül a pipe-ra – párhuzamos inference progress és modell események
 /// esetén sem keverednek az üzenetek.
+///
+/// Multi-session: a ResetForNewConnectionAsync új pipe instance-t hoz létre
+/// miután a CLI kilépett, így a következő CLI session csatlakozhat.
 /// </summary>
 public class EventPublisher : IAsyncDisposable
 {
     private readonly string _pipeName;
-    private NamedPipeServerStream _pipe;          // nem readonly
+    private NamedPipeServerStream _pipe;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private bool _disposed;
 
@@ -70,7 +73,9 @@ public class EventPublisher : IAsyncDisposable
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            await _pipe.DisposeAsync();
+            try { await _pipe.DisposeAsync(); }
+            catch (IOException) { /* már lezárt pipe – normál eset */ }
+
             _pipe = CreatePipe();
         }
         finally
@@ -83,7 +88,9 @@ public class EventPublisher : IAsyncDisposable
     /// Elküldi az EventEnvelope-ot a CLI-nek.
     /// WriteDelimitedTo gondoskodik a hossz prefix framing-ről.
     /// </summary>
-    public async Task PublishAsync(EventEnvelope envelope, CancellationToken cancellationToken = default)
+    public async Task PublishAsync(
+        EventEnvelope envelope,
+        CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -91,7 +98,6 @@ public class EventPublisher : IAsyncDisposable
         try
         {
             // WriteDelimitedTo = varint hossz prefix + protobuf bináris adat
-            // A CLI ParseDelimitedFrom-mal olvassa vissza
             envelope.WriteDelimitedTo(_pipe);
             await _pipe.FlushAsync(cancellationToken);
         }
@@ -103,7 +109,6 @@ public class EventPublisher : IAsyncDisposable
 
     // ─────────────────────────────────────────────
     // Gyártó metódusok – az összes esemény típushoz
-    // Ezek építik fel az EventEnvelope-ot és küldik el.
     // ─────────────────────────────────────────────
 
     public Task PublishServiceReadyAsync(string version, CancellationToken ct = default) =>

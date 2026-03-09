@@ -34,7 +34,7 @@ namespace Scaffold.Infrastructure.StepConfig;
 /// </summary>
 public class InputAssembler : IInputAssembler
 {
-    public string Assemble(string inputYamlPath)
+    public string Assemble(string inputYamlPath, string stepId)
     {
         if (!File.Exists(inputYamlPath))
             throw new FileNotFoundException(
@@ -43,10 +43,7 @@ public class InputAssembler : IInputAssembler
         var yaml = File.ReadAllText(inputYamlPath);
         var baseDir = Path.GetDirectoryName(Path.GetFullPath(inputYamlPath)) ?? ".";
 
-        // Path referenciák validálása – fail fast
-        ValidatePathReferences(yaml, baseDir, inputYamlPath);
-
-        // Teljes kontextus összeállítása
+        ValidatePathReferences(yaml, baseDir, stepId);  // inputYamlPath helyett stepId
         return BuildContext(yaml, baseDir);
     }
 
@@ -54,7 +51,7 @@ public class InputAssembler : IInputAssembler
     /// Végigolvassa a YAML-t, megkeresi az összes path referenciát,
     /// és ellenőrzi hogy a fájlok léteznek-e.
     /// </summary>
-    private static void ValidatePathReferences(string yaml, string baseDir, string inputYamlPath)
+    private static void ValidatePathReferences(string yaml, string baseDir, string stepId)
     {
         var stream = new YamlStream();
         stream.Load(new StringReader(yaml));
@@ -70,7 +67,7 @@ public class InputAssembler : IInputAssembler
 
             if (!File.Exists(fullPath))
                 throw new ScaffoldInputValidationException(
-                    stepId: Path.GetFileNameWithoutExtension(inputYamlPath),
+                    stepId: stepId,
                     fieldName: fieldPath,
                     invalidPath: fullPath);
         }

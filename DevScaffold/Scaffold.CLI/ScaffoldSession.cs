@@ -17,6 +17,7 @@
  */
 
 using Scaffold.Agent.Protocol;
+using Scaffold.Application;
 using Scaffold.Application.Interfaces;
 using Scaffold.Domain.Models;
 
@@ -26,10 +27,12 @@ namespace Scaffold.CLI;
 /// Egy scaffold lépés teljes életciklusát kezeli.
 /// Betölti a step agent configot, összerakja az InferRequest-et,
 /// elküldi a ServiceHost-nak, fogadja az eseményeket,
-/// és elvégzi a human validációt.
+/// elvégzi a human validációt, és audit logot ír.
 ///
-/// Progress és státusz üzenetek közvetlenül konzolra kerülnek –
-/// az IHumanValidationService kizárólag a validációs interakcióért felelős.
+/// Audit log és konzol üzenetek:
+/// - IAuditLogger: minden releváns esemény fájlba kerül (auto-flush)
+/// - IScaffoldConsole: színkódolt konzol kimenet szint szerint
+/// - IHumanValidationService: kizárólag a validációs interakcióért felelős
 /// </summary>
 public class ScaffoldSession : IAsyncDisposable
 {
@@ -37,26 +40,38 @@ public class ScaffoldSession : IAsyncDisposable
     private readonly IStepAgentConfigReader _configReader;
     private readonly IInputAssembler _inputAssembler;
     private readonly IHumanValidationService _humanValidation;
+    private readonly IAuditLogger _auditLogger;
+    private readonly IScaffoldConsole _console;
     private readonly string _stepConfigPath;
     private readonly string _inputYamlPath;
     private readonly string _modelAlias;
+    private readonly string _stepOutputFolder;
+    private readonly int _generation;
 
     public ScaffoldSession(
         PipeClient pipeClient,
         IStepAgentConfigReader configReader,
         IInputAssembler inputAssembler,
         IHumanValidationService humanValidation,
+        IAuditLogger auditLogger,
+        IScaffoldConsole console,
         string stepConfigPath,
         string inputYamlPath,
-        string modelAlias)
+        string modelAlias,
+        string stepOutputFolder,
+        int generation)
     {
         _pipeClient = pipeClient;
         _configReader = configReader;
         _inputAssembler = inputAssembler;
         _humanValidation = humanValidation;
+        _auditLogger = auditLogger;
+        _console = console;
         _stepConfigPath = stepConfigPath;
         _inputYamlPath = inputYamlPath;
         _modelAlias = modelAlias;
+        _stepOutputFolder = stepOutputFolder;
+        _generation = generation;
     }
 
     /// <summary>
@@ -67,7 +82,19 @@ public class ScaffoldSession : IAsyncDisposable
     /// </summary>
     public async Task<ValidationDecision> RunAsync(CancellationToken cancellationToken = default)
     {
+        var startTime = DateTime.UtcNow;
+
         var agentConfig = _configReader.Load(_stepConfigPath);
+
+        _auditLogger.Log(AuditEvent.SessionStart,
+            $"step={agentConfig.Step} generation={_generation}");
+
+        _auditLogger.Log(AuditEvent.Config,
+            $"model={_modelAlias} " +
+            $"system_prompt_length={agentConfig.SystemPrompt.Length} " +
+            $"max_tokens={agentConfig.MaxTokens?.ToString() ?? "default"} " +
+            $"output_folder={_stepOutputFolder}");
+
         var assembledInput = _inputAssembler.Assemble(_inputYamlPath, agentConfig.Step);
 
         var request = new InferRequest
@@ -77,14 +104,24 @@ public class ScaffoldSession : IAsyncDisposable
             ModelAlias = _modelAlias,
             SystemPrompt = agentConfig.SystemPrompt,
             UserInput = assembledInput,
-            MaxTokens = (uint)(agentConfig.MaxTokens ?? 0)
+            MaxTokens = (uint)(agentConfig.MaxTokens ?? 0),
+            OutputFolder = _stepOutputFolder
         };
+
+        _auditLogger.Log(AuditEvent.InferenceStart,
+            $"request_id={request.RequestId} step={request.StepId} model={request.ModelAlias}");
 
         await _pipeClient.SendAsync(
             new CommandEnvelope { Infer = request },
             cancellationToken);
 
-        return await WaitForCompletionAsync(request, cancellationToken);
+        var decision = await WaitForCompletionAsync(request, startTime, cancellationToken);
+
+        var totalElapsed = (uint)(DateTime.UtcNow - startTime).TotalSeconds;
+        _auditLogger.Log(AuditEvent.SessionEnd,
+            $"total_elapsed={totalElapsed}s outcome={decision.Outcome}");
+
+        return decision;
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -95,6 +132,7 @@ public class ScaffoldSession : IAsyncDisposable
 
     private async Task<ValidationDecision> WaitForCompletionAsync(
         InferRequest request,
+        DateTime startTime,
         CancellationToken cancellationToken)
     {
         var completionTcs = new TaskCompletionSource<ValidationDecision>();
@@ -104,41 +142,86 @@ public class ScaffoldSession : IAsyncDisposable
             switch (evt.EventCase)
             {
                 case EventEnvelope.EventOneofCase.InferenceStarted:
-                    Console.WriteLine(
-                        $"[SCAFFOLD] Generálás elindult | step: {evt.InferenceStarted.StepId}" +
+                    _console.WriteSession(
+                        $"[SESSION] Generálás elindult | step: {evt.InferenceStarted.StepId}" +
                         $" | modell: {evt.InferenceStarted.ModelAlias}");
                     break;
 
                 case EventEnvelope.EventOneofCase.InferenceProgress:
                     if (evt.InferenceProgress.RequestId == request.RequestId)
-                        Console.WriteLine($"[SCAFFOLD] {evt.InferenceProgress.StatusMessage}");
+                        _console.WriteSession($"[SESSION] {evt.InferenceProgress.StatusMessage}");
                     break;
 
                 case EventEnvelope.EventOneofCase.InferenceCompleted:
                     if (evt.InferenceCompleted.RequestId == request.RequestId)
                     {
+                        var completed = evt.InferenceCompleted;
+
+                        _auditLogger.Log(AuditEvent.InferenceDone,
+                            $"tokens={completed.TokensGenerated} " +
+                            $"elapsed={completed.ElapsedSeconds}s " +
+                            $"tok_s={TokPerSec(completed.TokensGenerated, completed.ElapsedSeconds):F1}");
+
+                        _auditLogger.Log(AuditEvent.Output,
+                            $"path={completed.OutputFilePath}");
+
+                        _console.WriteSession(
+                            $"[SESSION] Generálás kész | " +
+                            $"{completed.TokensGenerated:N0} token | " +
+                            $"{completed.ElapsedSeconds}s | " +
+                            $"{TokPerSec(completed.TokensGenerated, completed.ElapsedSeconds):F1} tok/s");
+
                         var decision = await _humanValidation.ValidateAsync(
                             request.StepId,
-                            evt.InferenceCompleted.OutputFilePath);
+                            completed.OutputFilePath);
+
+                        _auditLogger.Log(AuditEvent.Validation,
+                            FormatValidationLog(decision));
+
                         completionTcs.TrySetResult(decision);
                     }
                     break;
 
                 case EventEnvelope.EventOneofCase.InferenceCancelled:
                     if (evt.InferenceCancelled.RequestId == request.RequestId)
+                    {
+                        _auditLogger.Log(AuditEvent.Error, "reason=inference_cancelled");
                         completionTcs.TrySetResult(
                             new ValidationDecision(ValidationOutcome.Reject,
                                 "Inference megszakítva."));
+                    }
                     break;
 
                 case EventEnvelope.EventOneofCase.InferenceFailed:
                     if (evt.InferenceFailed.RequestId == request.RequestId)
+                    {
+                        _auditLogger.Log(AuditEvent.Error,
+                            $"reason=inference_failed message=\"{evt.InferenceFailed.ErrorMessage}\"");
                         completionTcs.TrySetException(
                             new InvalidOperationException(evt.InferenceFailed.ErrorMessage));
+                    }
                     break;
             }
         };
 
         return await completionTcs.Task.WaitAsync(cancellationToken);
+    }
+
+    private static double TokPerSec(uint tokens, uint elapsedSeconds) =>
+        elapsedSeconds > 0 ? (double)tokens / elapsedSeconds : 0;
+
+    private static string FormatValidationLog(ValidationDecision decision)
+    {
+        var base_ = $"outcome={decision.Outcome}";
+
+        if (decision.Outcome == ValidationOutcome.Reject
+            && !string.IsNullOrWhiteSpace(decision.RejectionClarification))
+        {
+            // Az idézőjelek között lévő szöveg custom parser-ben egyszerűen kinyerhető
+            var escaped = decision.RejectionClarification.Replace("\"", "'");
+            return $"{base_} clarification=\"{escaped}\"";
+        }
+
+        return base_;
     }
 }

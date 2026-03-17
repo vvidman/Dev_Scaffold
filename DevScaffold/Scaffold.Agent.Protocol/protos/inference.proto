@@ -34,6 +34,9 @@ message InferRequest {
     // Maximális token szám a válaszban.
     // 0 esetén a ServiceHost az alapértelmezett értéket használja.
     uint32 max_tokens = 6;
+
+    // CLI adja meg, ServiceHost ebbe ír
+    string output_folder = 7; 
 }
 
 // ─────────────────────────────────────────────

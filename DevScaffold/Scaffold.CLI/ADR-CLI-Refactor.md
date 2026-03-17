@@ -1,6 +1,7 @@
 # ADR – Scaffold CLI Refaktor
 
 **Dátum:** 2026-03-05  
+**Frissítve:** 2026-03-17  
 **Státusz:** Elfogadott  
 **Érintett projektek:** Scaffold.CLI
 
@@ -16,6 +17,11 @@ Az eredeti CLI implementáció (`PipelineRunner` alapú) a teljes pipeline orche
 - A 2-4. lépés taszkonként fut – nem egyszer, hanem annyiszor ahány taszk van
 
 A human az orchestrátor – ő dönti el mikor fut a következő lépés és mivel.
+
+A refaktor második köre (2026-03-17) bevezette az audit log rendszert és a strukturált konzol kimenetet, mert:
+- A `Console.WriteLine` hívások szétszórtak és nem archivált – egy session után elveszett minden nyom
+- A human validáció döntése (különösen a Reject pontosítása) nem volt rögzítve sehol
+- A különböző szintű üzenetek (infrastruktúra, inference progress, validáció) vizuálisan nem különültek el
 
 ---
 
@@ -98,19 +104,22 @@ DevScaffold shutdown → ServiceHost leáll → CLI kilép
 - `IStepAgentConfigReader` – agent system prompt betöltése
 - `IInputAssembler` – input yaml + path referencia feloldás
 - `ConsoleHumanValidationService` – human validáció
+- `FileAuditLogger` – audit log írás
+- Generáció számítás – step output folder meghatározása
 
 ---
 
 ### 6. Komponens struktúra
 
-**Döntés:** Négy komponens, Single Responsibility elvvel:
+**Döntés:** Öt komponens, Single Responsibility elvvel:
 
 | Komponens | Egyetlen felelősség |
 |---|---|
 | `PipeClient` | Named Pipe kapcsolat kezelés |
 | `ServiceHostLauncher` | ServiceHost auto-indítás és ready várakozás |
-| `ScaffoldSession` | Egyetlen lépés futtatása human validációval |
-| `Program.cs` | Parancs értelmezés, összerakás |
+| `ScaffoldSession` | Egyetlen lépés futtatása human validációval + audit log |
+| `FileAuditLogger` | Audit log írás fájlba, auto-flush |
+| `Program.cs` | Parancs értelmezés, generáció számítás, összerakás |
 
 ---
 
@@ -204,14 +213,105 @@ DevScaffold shutdown → ServiceHost leáll → CLI kilép
 
 ---
 
+### 15. Step output folder struktúra – generáció alapú sorszámozás
+
+**Döntés:** Minden `DevScaffold run` hívás egy dedikált step output foldert kap: `{output}/{stepId}_{n}`, ahol `n` az aktuális generáció sorszáma (1-től indul).
+
+```
+{output}/
+  task_breakdown_1/     ← első futás
+    output_abc12345.md
+    audit.log
+  task_breakdown_2/     ← első Reject után
+    output_def67890.md
+    audit.log
+  code_generation_1/
+    output_...md
+    audit.log
+```
+
+**Indoklás:**
+- A generációk nyomon követhetők: hány újragenerálás kellett a megfelelő eredményhez
+- A Reject pontosítása és a döntés az audit logban marad – nem vész el
+- Minden futás izolált: az output és az audit log egy helyen van
+- A human látja az evolúciót – összehasonlíthatja a generációkat
+
+---
+
+### 16. Generáció számítás – filesystem alapú, process újraindulás-biztos
+
+**Döntés:** A CLI a generáció sorszámát futáskor számolja: megnézi hány `{stepId}_*` nevű folder létezik már az output mappában, és a max sorszám + 1-et veszi.
+
+**Indoklás:**
+- A CLI process rövid életű – nem tarthat állapotot memóriában a futások között
+- Filesystem alapú számítás process újraindulás esetén is helyes marad
+- Lyukas sorozat (pl. ha a human töröl egy foldert) esetén is helyes: a max-ot veszi, nem a count-ot
+- A generáció sorszámot a CLI adja át a ServiceHost-nak az `InferRequest.OutputFolder` mezőben
+
+---
+
+### 17. Audit log – plain text, fix szélességű tag oszlop, auto-flush
+
+**Döntés:** Minden step output folder tartalmaz egy `audit.log` fájlt. A formátum:
+```
+2026-03-17 14:23:01.123 [INFO ] [SESSION_START   ] step=task_breakdown generation=1
+2026-03-17 14:23:01.124 [INFO ] [CONFIG          ] model=qwen-7b system_prompt_length=342
+2026-03-17 14:25:43.891 [INFO ] [INFERENCE_DONE  ] tokens=847 elapsed=162s tok_s=5.2
+2026-03-17 14:25:50.012 [INFO ] [VALIDATION      ] outcome=Reject clarification="Részletesebb bontás kell"
+2026-03-17 14:25:50.013 [INFO ] [SESSION_END     ] total_elapsed=169s outcome=Reject
+```
+
+A log `AutoFlush = true` módban íródik.
+
+**Indoklás:**
+- Human-readable: nincs szükség külső toolra az olvasáshoz
+- Custom parser-barát: fix pozíción lévő timestamp (23 kar), level (7 kar), tag (18 kar) – pozíció alapú split elegendő
+- A `key=value` formátum statisztikai feldolgozásra is alkalmas (pl. átlagos tok/s per step típus)
+- Auto-flush: CLI crash esetén is megmarad a részleges adat – a legfontosabb információ (ki lett adva a feladat, mi lett a döntés) nem veszhet el
+
+**Rögzített események:**
+| Tag | Tartalom |
+|---|---|
+| `SESSION_START` | step, generation |
+| `CONFIG` | model, system_prompt_length, max_tokens, output_folder |
+| `INFERENCE_START` | request_id, step, model |
+| `INFERENCE_DONE` | tokens, elapsed, tok_s |
+| `OUTPUT` | path (a generált fájl teljes path-ja) |
+| `VALIDATION` | outcome, clarification (Reject esetén) |
+| `SESSION_END` | total_elapsed, outcome |
+| `ERROR` | reason, message |
+
+---
+
+### 18. IScaffoldConsole – háromszintű konzol kimenet, színkódolással
+
+**Döntés:** A `Console.WriteLine` hívások helyett minden komponens `IScaffoldConsole`-t használ, ami háromszintű, színkódolt kimenetet biztosít.
+
+| Szint | Metódus | Szín | Tartalom |
+|---|---|---|---|
+| CLI | `WriteCli` | Cyan | Infrastruktúra, ServiceHost indítás, pipe, folder létrehozás |
+| Session | `WriteSession` | Gray | Inference progress, ServiceHost események |
+| Validation | `WriteValidation` | Yellow | Human validációs interakció, döntés bekérés |
+| Error | `WriteError` | Red | Hibák (stderr-re kerül) |
+
+**Indoklás:**
+- A különböző szintű üzenetek vizuálisan elkülönülnek – a human egy pillantással látja mi infrastruktúra és mi az AI kimenet állapota
+- Az absztrakció tesztelhetővé teszi a konzol kimenetet
+- A három szint természetesen leképezi a rendszer három rétegét: CLI infrastruktúra, inference futás, human döntés
+
+---
+
 ## Összefoglaló – az eredeti és az új CLI összehasonlítása
 
-| Szempont | Eredeti CLI | Új CLI |
-|---|---|---|
-| Granularitás | Pipeline szintű | Lépés szintű |
-| Orchestráció | PipelineRunner | Human |
-| Modell kezelés | CLI-ben | ServiceHost felelőssége |
-| Lépések sorrendje | pipeline.yaml | Human dönti el |
-| CLI lifecycle | Pipeline végéig fut | Egy lépés után kilép |
-| ServiceHost lifecycle | CLI-vel együtt | Független, explicit shutdown |
-| Kommunikáció | Közvetlen függőség | Named Pipe, CommandEnvelope |
+| Szempont | Eredeti CLI | Első refaktor | Második refaktor |
+|---|---|---|---|
+| Granularitás | Pipeline szintű | Lépés szintű | Lépés szintű |
+| Orchestráció | PipelineRunner | Human | Human |
+| Modell kezelés | CLI-ben | ServiceHost felelőssége | ServiceHost felelőssége |
+| Lépések sorrendje | pipeline.yaml | Human dönti el | Human dönti el |
+| CLI lifecycle | Pipeline végéig fut | Egy lépés után kilép | Egy lépés után kilép |
+| ServiceHost lifecycle | CLI-vel együtt | Független, explicit shutdown | Független, explicit shutdown |
+| Kommunikáció | Közvetlen függőség | Named Pipe, CommandEnvelope | Named Pipe, CommandEnvelope |
+| Output folder | ServiceHost határozza meg | ServiceHost határozza meg | CLI határozza meg (generáció) |
+| Audit log | Nincs | Nincs | Fájlba, auto-flush |
+| Konzol kimenet | `Console.WriteLine` | `Console.WriteLine` | Színkódolt, szint szerinti |

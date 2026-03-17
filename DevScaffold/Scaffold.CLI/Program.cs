@@ -93,10 +93,59 @@ async Task<int> RunAsync(
     // ─────────────────────────────────────────────
 
     var services = new ServiceCollection();
+    services.AddSingleton<IScaffoldConsole, ConsoleScaffoldConsole>();
     services.AddSingleton<IStepAgentConfigReader, YamlStepAgentConfigReader>();
     services.AddSingleton<IInputAssembler, InputAssembler>();
     services.AddSingleton<IHumanValidationService, ConsoleHumanValidationService>();
     var provider = services.BuildServiceProvider();
+
+    var scaffoldConsole = provider.GetRequiredService<IScaffoldConsole>();
+
+    // ─────────────────────────────────────────────
+    // Step azonosítás – generáció számításhoz szükséges a stepId
+    // ─────────────────────────────────────────────
+
+    string stepId;
+    try
+    {
+        var configReader = provider.GetRequiredService<IStepAgentConfigReader>();
+        stepId = configReader.Load(stepConfigPath).Step;
+    }
+    catch (Exception ex)
+    {
+        scaffoldConsole.WriteError($"[SCAFFOLD ERROR] Step konfiguráció betöltési hiba: {ex.Message}");
+        return 1;
+    }
+
+    // ─────────────────────────────────────────────
+    // Generáció számítás + step output folder létrehozása
+    // ─────────────────────────────────────────────
+
+    int generation;
+    string stepOutputFolder;
+    try
+    {
+        generation = ComputeNextGeneration(outputBasePath, stepId);
+        stepOutputFolder = Path.Combine(outputBasePath, $"{stepId}_{generation}");
+        Directory.CreateDirectory(stepOutputFolder);
+        scaffoldConsole.WriteCli(
+            $"[SCAFFOLD] Step output folder: {stepOutputFolder} (generáció: {generation})");
+    }
+    catch (Exception ex)
+    {
+        scaffoldConsole.WriteError(
+            $"[SCAFFOLD ERROR] Output folder létrehozása sikertelen: {ex.Message}");
+        return 1;
+    }
+
+    // ─────────────────────────────────────────────
+    // Audit logger – step output folderbe kerül
+    // ─────────────────────────────────────────────
+
+    var auditLogPath = Path.Combine(stepOutputFolder, "audit.log");
+    await using var auditLogger = new FileAuditLogger(auditLogPath);
+
+    scaffoldConsole.WriteCli($"[SCAFFOLD] Audit log: {auditLogPath}");
 
     // ─────────────────────────────────────────────
     // ServiceHost indítás
@@ -116,14 +165,14 @@ async Task<int> RunAsync(
     }
     catch (InvalidOperationException ex)
     {
-        Console.ForegroundColor = ConsoleColor.Red;
-        Console.Error.WriteLine(ex.Message);
-        Console.ResetColor();
+        scaffoldConsole.WriteError(ex.Message);
+        auditLogger.Log(Scaffold.Application.AuditEvent.Error,
+            $"reason=servicehost_start_failed message=\"{ex.Message}\"");
         return 1;
     }
     catch (OperationCanceledException)
     {
-        Console.WriteLine("[SCAFFOLD] Megszakítva.");
+        scaffoldConsole.WriteCli("[SCAFFOLD] Megszakítva.");
         return 1;
     }
 
@@ -138,9 +187,13 @@ async Task<int> RunAsync(
             provider.GetRequiredService<IStepAgentConfigReader>(),
             provider.GetRequiredService<IInputAssembler>(),
             provider.GetRequiredService<IHumanValidationService>(),
+            auditLogger,
+            scaffoldConsole,
             stepConfigPath: stepConfigPath,
             inputYamlPath: inputYamlPath,
-            modelAlias: modelAlias);
+            modelAlias: modelAlias,
+            stepOutputFolder: stepOutputFolder,
+            generation: generation);
 
         try
         {
@@ -150,39 +203,39 @@ async Task<int> RunAsync(
             {
                 ValidationOutcome.Accept => 0,
                 ValidationOutcome.Edit => 0,
-                ValidationOutcome.Reject => HandleReject(decision),
+                ValidationOutcome.Reject => HandleReject(decision, scaffoldConsole),
                 _ => 0
             };
         }
         catch (Scaffold.Application.ScaffoldInputValidationException ex)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.Error.WriteLine(ex.Message);
-            Console.ResetColor();
+            scaffoldConsole.WriteError(ex.Message);
+            auditLogger.Log(Scaffold.Application.AuditEvent.Error,
+                $"reason=input_validation message=\"{ex.Message.Replace("\"", "'")}\"");
             return 1;
         }
         catch (OperationCanceledException)
         {
-            Console.WriteLine("[SCAFFOLD] Futás megszakítva.");
+            scaffoldConsole.WriteCli("[SCAFFOLD] Futás megszakítva.");
             return 1;
         }
         catch (Exception ex)
         {
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.Error.WriteLine($"[SCAFFOLD ERROR] Váratlan hiba: {ex.Message}");
-            Console.Error.WriteLine(ex.StackTrace);
-            Console.ResetColor();
+            scaffoldConsole.WriteError($"[SCAFFOLD ERROR] Váratlan hiba: {ex.Message}");
+            scaffoldConsole.WriteError(ex.StackTrace ?? string.Empty);
+            auditLogger.Log(Scaffold.Application.AuditEvent.Error,
+                $"reason=unexpected message=\"{ex.Message.Replace("\"", "'")}\"");
             return 1;
         }
     }
 }
 
-static int HandleReject(ValidationDecision decision)
+static int HandleReject(ValidationDecision decision, IScaffoldConsole console)
 {
-    Console.WriteLine("[SCAFFOLD] Lépés visszaküldve.");
+    console.WriteCli("[SCAFFOLD] Lépés visszaküldve.");
 
     if (!string.IsNullOrWhiteSpace(decision.RejectionClarification))
-        Console.WriteLine($"[SCAFFOLD] Pontosítás: {decision.RejectionClarification}");
+        console.WriteCli($"[SCAFFOLD] Pontosítás rögzítve az audit logban.");
 
     // Exit 2 jelzi a hívónak (pl. shell script) hogy reject történt,
     // nem hiba – újrafuttatás szükséges.
@@ -198,10 +251,11 @@ async Task<int> ShutdownAsync(
     CancellationToken cancellationToken)
 {
     var pipeName = args.GetValueOrDefault("--pipe-name", "scaffold");
+    var console = new ConsoleScaffoldConsole();
 
     if (!File.Exists($@"\\.\pipe\{pipeName}-events"))
     {
-        Console.WriteLine("[SCAFFOLD] ServiceHost nem fut.");
+        console.WriteCli("[SCAFFOLD] ServiceHost nem fut.");
         return 0;
     }
 
@@ -215,7 +269,7 @@ async Task<int> ShutdownAsync(
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[SCAFFOLD ERROR] Pipe csatlakozás sikertelen: {ex.Message}");
+            console.WriteError($"[SCAFFOLD ERROR] Pipe csatlakozás sikertelen: {ex.Message}");
             return 1;
         }
 
@@ -225,7 +279,7 @@ async Task<int> ShutdownAsync(
 
         if (!isReady)
         {
-            Console.Error.WriteLine("[SCAFFOLD ERROR] ServiceHost nem válaszolt.");
+            console.WriteError("[SCAFFOLD ERROR] ServiceHost nem válaszolt.");
             return 1;
         }
 
@@ -243,18 +297,62 @@ async Task<int> ShutdownAsync(
             new CommandEnvelope { Shutdown = new ShutdownRequest() },
             cancellationToken);
 
-        Console.WriteLine("[SCAFFOLD] Leállítás elküldve. Várakozás visszaigazolásra...");
+        console.WriteCli("[SCAFFOLD] Leállítás elküldve. Várakozás visszaigazolásra...");
 
         await Task.WhenAny(
             shuttingDownTcs.Task,
             Task.Delay(TimeSpan.FromSeconds(5), cancellationToken));
 
-        Console.WriteLine(shuttingDownTcs.Task.IsCompleted
+        console.WriteCli(shuttingDownTcs.Task.IsCompleted
             ? "[SCAFFOLD] ServiceHost leállítva."
             : "[SCAFFOLD] Leállítás elküldve (visszaigazolás nem érkezett).");
 
         return 0;
     }
+}
+
+// ─────────────────────────────────────────────
+// Generáció számítás
+// ─────────────────────────────────────────────
+
+/// <summary>
+/// Meghatározza a következő generáció sorszámát.
+/// Filesystem alapú – CLI process újraindulás esetén is helyes marad.
+///
+/// Pl. ha létezik task_breakdown_1 és task_breakdown_2, a következő 3.
+/// </summary>
+static int ComputeNextGeneration(string outputBasePath, string stepId)
+{
+    if (!Directory.Exists(outputBasePath))
+        return 1;
+
+    // Megnézi hány {stepId}_* nevű folder létezik már
+    var existing = Directory.GetDirectories(
+        outputBasePath,
+        $"{stepId}_*",
+        SearchOption.TopDirectoryOnly);
+
+    // A sorszámokat kinyeri és a maximumot veszi – lyukas sorozat esetén is helyes
+    // Pl. ha csak _1 és _3 van (a _2 törölve lett), akkor a következő _4
+    var maxGeneration = existing
+        .Select(dir => Path.GetFileName(dir))
+        .Select(name => TryParseGeneration(name, stepId))
+        .Where(n => n.HasValue)
+        .Select(n => n!.Value)
+        .DefaultIfEmpty(0)
+        .Max();
+
+    return maxGeneration + 1;
+}
+
+static int? TryParseGeneration(string folderName, string stepId)
+{
+    var prefix = $"{stepId}_";
+    if (!folderName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        return null;
+
+    var suffix = folderName[prefix.Length..];
+    return int.TryParse(suffix, out var n) ? n : null;
 }
 
 // ─────────────────────────────────────────────

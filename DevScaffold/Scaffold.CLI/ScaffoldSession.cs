@@ -23,41 +23,27 @@ using Scaffold.Domain.Models;
 namespace Scaffold.CLI;
 
 /// <summary>
-/// Egyetlen pipeline lépés futtatásának koordinálása.
+/// Egy scaffold lépés teljes életciklusát kezeli.
+/// Betölti a step agent configot, összerakja az InferRequest-et,
+/// elküldi a ServiceHost-nak, fogadja az eseményeket,
+/// és elvégzi a human validációt.
 ///
-/// Felelőssége:
-/// - Input összerakás (IInputAssembler)
-/// - InferRequest küldése a ServiceHost-nak
-/// - Esemény fogadás és konzolra írás
-/// - Human validáció (Accept / Edit / Reject)
-/// - Reject esetén: ugyanaz a lépés újrafut pontosítással
-///
-/// Egy ScaffoldSession = egy lépés futtatása.
-/// A CLI minden run híváskor új session-t hoz létre,
-/// majd kilép amikor a lépés elfogadásra kerül.
+/// Progress és státusz üzenetek közvetlenül konzolra kerülnek –
+/// az IHumanValidationService kizárólag a validációs interakcióért felelős.
 /// </summary>
 public class ScaffoldSession : IAsyncDisposable
 {
     private readonly PipeClient _pipeClient;
-    private readonly IStepAgentConfigReader _stepAgentConfigReader;
+    private readonly IStepAgentConfigReader _configReader;
     private readonly IInputAssembler _inputAssembler;
     private readonly IHumanValidationService _humanValidation;
-
     private readonly string _stepConfigPath;
     private readonly string _inputYamlPath;
     private readonly string _modelAlias;
 
-    // Inference eredmény várakozáshoz
-    private TaskCompletionSource<InferenceCompletedEvent>? _inferenceCompletedTcs;
-    private TaskCompletionSource<InferenceCancelledEvent>? _inferenceCancelledTcs;
-    private TaskCompletionSource<InferenceFailedEvent>? _inferenceFailedTcs;
-
-    private readonly SemaphoreSlim _eventLock = new(1, 1);
-    private bool _disposed;
-
     public ScaffoldSession(
         PipeClient pipeClient,
-        IStepAgentConfigReader stepAgentConfigReader,
+        IStepAgentConfigReader configReader,
         IInputAssembler inputAssembler,
         IHumanValidationService humanValidation,
         string stepConfigPath,
@@ -65,251 +51,94 @@ public class ScaffoldSession : IAsyncDisposable
         string modelAlias)
     {
         _pipeClient = pipeClient;
-        _stepAgentConfigReader = stepAgentConfigReader;
+        _configReader = configReader;
         _inputAssembler = inputAssembler;
         _humanValidation = humanValidation;
         _stepConfigPath = stepConfigPath;
         _inputYamlPath = inputYamlPath;
         _modelAlias = modelAlias;
-
-        _pipeClient.EventReceived += HandleEventAsync;
     }
 
     /// <summary>
-    /// Futtatja a lépést human validációval.
-    /// Reject esetén ugyanaz a lépés újrafut pontosítással.
-    /// Accept vagy Edit esetén visszatér.
+    /// Lefuttatja a lépést és visszaadja a human validáció döntését.
+    /// A hívónak (Program.cs) kell kezelni az Outcome-ot:
+    ///   Accept / Edit → sikeres futás (exit 0)
+    ///   Reject        → újragenerálás vagy kilépés (exit 2)
     /// </summary>
-    public async Task RunAsync(CancellationToken cancellationToken = default)
+    public async Task<ValidationDecision> RunAsync(CancellationToken cancellationToken = default)
     {
-        var agentConfig = _stepAgentConfigReader.Load(_stepConfigPath);
+        var agentConfig = _configReader.Load(_stepConfigPath);
         var assembledInput = _inputAssembler.Assemble(_inputYamlPath, agentConfig.Step);
 
-        Console.WriteLine($"[SCAFFOLD] Lépés: {agentConfig.Step}");
-        Console.WriteLine();
-
-        bool accepted = false;
-        string? rejectionContext = null;
-
-        while (!accepted)
+        var request = new InferRequest
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            RequestId = Guid.NewGuid().ToString("N"),
+            StepId = agentConfig.Step,
+            ModelAlias = _modelAlias,
+            SystemPrompt = agentConfig.SystemPrompt,
+            UserInput = assembledInput,
+            MaxTokens = (uint)(agentConfig.MaxTokens ?? 0)
+        };
 
-            var requestId = Guid.NewGuid().ToString();
+        await _pipeClient.SendAsync(
+            new CommandEnvelope { Infer = request },
+            cancellationToken);
 
-            var userInput = rejectionContext is null
-                ? assembledInput
-                : BuildRejectionPrompt(assembledInput, rejectionContext);
-
-            var request = new InferRequest
-            {
-                RequestId = requestId,
-                StepId = agentConfig.Step,
-                ModelAlias = _modelAlias,
-                SystemPrompt = agentConfig.SystemPrompt,
-                UserInput = userInput
-            };
-
-            await _pipeClient.SendAsync(
-                new CommandEnvelope { Infer = request },
-                cancellationToken);
-
-            Console.WriteLine("[SCAFFOLD] Inference kérés elküldve. Várakozás...");
-
-            var outputFilePath = await WaitForInferenceResultAsync(
-                requestId,
-                agentConfig.Step,
-                cancellationToken);
-
-            if (outputFilePath is null)
-                return;
-
-            Console.WriteLine($"[SCAFFOLD] Kimenet: {outputFilePath}");
-            Console.WriteLine();
-
-            var decision = await _humanValidation.ValidateAsync(
-                agentConfig.Step,
-                outputFilePath);
-
-            switch (decision.Outcome)
-            {
-                case ValidationOutcome.Accept:
-                    Console.WriteLine("[SCAFFOLD] ✓ Elfogadva.");
-                    Console.WriteLine();
-                    accepted = true;
-                    break;
-
-                case ValidationOutcome.Edit:
-                    Console.WriteLine("[SCAFFOLD] ✎ Szerkesztett kimenet elfogadva.");
-                    Console.WriteLine();
-                    accepted = true;
-                    break;
-
-                case ValidationOutcome.Reject:
-                    Console.WriteLine("[SCAFFOLD] ✗ Visszaküldve. Újragenerálás...");
-                    Console.WriteLine();
-                    rejectionContext = decision.RejectionClarification;
-                    break;
-            }
-        }
+        return await WaitForCompletionAsync(request, cancellationToken);
     }
 
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
     // ─────────────────────────────────────────────
-    // Inference eredmény várakozás
+    // Privát implementáció
     // ─────────────────────────────────────────────
 
-    private async Task<string?> WaitForInferenceResultAsync(
-        string requestId,
-        string stepId,
+    private async Task<ValidationDecision> WaitForCompletionAsync(
+        InferRequest request,
         CancellationToken cancellationToken)
     {
-        await _eventLock.WaitAsync(cancellationToken);
-        try
+        var completionTcs = new TaskCompletionSource<ValidationDecision>();
+
+        _pipeClient.EventReceived += async evt =>
         {
-            _inferenceCompletedTcs = new TaskCompletionSource<InferenceCompletedEvent>();
-            _inferenceCancelledTcs = new TaskCompletionSource<InferenceCancelledEvent>();
-            _inferenceFailedTcs = new TaskCompletionSource<InferenceFailedEvent>();
-        }
-        finally
-        {
-            _eventLock.Release();
-        }
+            switch (evt.EventCase)
+            {
+                case EventEnvelope.EventOneofCase.InferenceStarted:
+                    Console.WriteLine(
+                        $"[SCAFFOLD] Generálás elindult | step: {evt.InferenceStarted.StepId}" +
+                        $" | modell: {evt.InferenceStarted.ModelAlias}");
+                    break;
 
-        using var cancelReg = cancellationToken.Register(() =>
-        {
-            _inferenceCompletedTcs?.TrySetCanceled();
-            _inferenceCancelledTcs?.TrySetCanceled();
-            _inferenceFailedTcs?.TrySetCanceled();
-        });
+                case EventEnvelope.EventOneofCase.InferenceProgress:
+                    if (evt.InferenceProgress.RequestId == request.RequestId)
+                        Console.WriteLine($"[SCAFFOLD] {evt.InferenceProgress.StatusMessage}");
+                    break;
 
-        var completedTask = _inferenceCompletedTcs.Task;
-        var cancelledTask = _inferenceCancelledTcs.Task;
-        var failedTask = _inferenceFailedTcs.Task;
+                case EventEnvelope.EventOneofCase.InferenceCompleted:
+                    if (evt.InferenceCompleted.RequestId == request.RequestId)
+                    {
+                        var decision = await _humanValidation.ValidateAsync(
+                            request.StepId,
+                            evt.InferenceCompleted.OutputFilePath);
+                        completionTcs.TrySetResult(decision);
+                    }
+                    break;
 
-        var winner = await Task.WhenAny(completedTask, cancelledTask, failedTask);
+                case EventEnvelope.EventOneofCase.InferenceCancelled:
+                    if (evt.InferenceCancelled.RequestId == request.RequestId)
+                        completionTcs.TrySetResult(
+                            new ValidationDecision(ValidationOutcome.Reject,
+                                "Inference megszakítva."));
+                    break;
 
-        await _eventLock.WaitAsync(cancellationToken);
-        try
-        {
-            _inferenceCompletedTcs = null;
-            _inferenceCancelledTcs = null;
-            _inferenceFailedTcs = null;
-        }
-        finally
-        {
-            _eventLock.Release();
-        }
+                case EventEnvelope.EventOneofCase.InferenceFailed:
+                    if (evt.InferenceFailed.RequestId == request.RequestId)
+                        completionTcs.TrySetException(
+                            new InvalidOperationException(evt.InferenceFailed.ErrorMessage));
+                    break;
+            }
+        };
 
-        if (winner == completedTask)
-            return completedTask.Result.OutputFilePath;
-
-        if (winner == cancelledTask)
-        {
-            Console.WriteLine($"[SCAFFOLD] Inference megszakítva: {stepId}");
-            return null;
-        }
-
-        Console.Error.WriteLine(
-            $"[SCAFFOLD ERROR] Inference hiba ({stepId}): {failedTask.Result.ErrorMessage}");
-        return null;
-    }
-
-    // ─────────────────────────────────────────────
-    // Event handler
-    // ─────────────────────────────────────────────
-
-    private async Task HandleEventAsync(EventEnvelope envelope)
-    {
-        switch (envelope.EventCase)
-        {
-            case EventEnvelope.EventOneofCase.InferenceStarted:
-                Console.WriteLine(
-                    $"[SCAFFOLD] Inference elindult " +
-                    $"(modell: {envelope.InferenceStarted.ModelAlias})");
-                break;
-
-            case EventEnvelope.EventOneofCase.InferenceProgress:
-                var progress = envelope.InferenceProgress;
-                Console.WriteLine(
-                    $"[SCAFFOLD] {progress.StatusMessage} ({progress.ElapsedSeconds}s)");
-                break;
-
-            case EventEnvelope.EventOneofCase.InferenceCompleted:
-                await _eventLock.WaitAsync();
-                try
-                {
-                    _inferenceCompletedTcs?.TrySetResult(envelope.InferenceCompleted);
-                }
-                finally
-                {
-                    _eventLock.Release();
-                }
-                break;
-
-            case EventEnvelope.EventOneofCase.InferenceCancelled:
-                await _eventLock.WaitAsync();
-                try
-                {
-                    _inferenceCancelledTcs?.TrySetResult(envelope.InferenceCancelled);
-                }
-                finally
-                {
-                    _eventLock.Release();
-                }
-                break;
-
-            case EventEnvelope.EventOneofCase.InferenceFailed:
-                await _eventLock.WaitAsync();
-                try
-                {
-                    _inferenceFailedTcs?.TrySetResult(envelope.InferenceFailed);
-                }
-                finally
-                {
-                    _eventLock.Release();
-                }
-                break;
-
-            case EventEnvelope.EventOneofCase.ModelStatusChanged:
-                var modelEvt = envelope.ModelStatusChanged;
-                Console.WriteLine(
-                    $"[SCAFFOLD] Modell: {modelEvt.ModelAlias} → {modelEvt.Status}" +
-                    (string.IsNullOrEmpty(modelEvt.Message) ? "" : $" ({modelEvt.Message})"));
-                break;
-
-            case EventEnvelope.EventOneofCase.ServiceError:
-                Console.Error.WriteLine(
-                    $"[SCAFFOLD ERROR] {envelope.ServiceError.ErrorCode}: " +
-                    $"{envelope.ServiceError.ErrorMessage}");
-                break;
-
-            case EventEnvelope.EventOneofCase.ServiceShuttingDown:
-                Console.WriteLine("[SCAFFOLD] ServiceHost leállás jelzés érkezett.");
-                break;
-        }
-    }
-
-    // ─────────────────────────────────────────────
-    // Segédmetódusok
-    // ─────────────────────────────────────────────
-
-    private static string BuildRejectionPrompt(
-        string originalInput,
-        string? clarification) =>
-        $"""
-        ## Eredeti input
-        {originalInput}
-
-        ## Pontosítás
-        {clarification ?? "Kérlek próbáld újra, figyelj a minőségre."}
-        """;
-
-    public async ValueTask DisposeAsync()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        _pipeClient.EventReceived -= HandleEventAsync;
-        _eventLock.Dispose();
+        return await completionTcs.Task.WaitAsync(cancellationToken);
     }
 }

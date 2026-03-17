@@ -34,12 +34,14 @@ namespace Scaffold.ServiceHost.InferenceImpl;
 internal sealed class LlamaInferenceBackend : IInferenceBackend
 {
     private readonly LLamaWeights _weights;
+    private readonly LLamaContext _context;
     private readonly ModelConfig _config;
     private bool _disposed;
 
-    private LlamaInferenceBackend(LLamaWeights weights, ModelConfig config)
+    private LlamaInferenceBackend(LLamaWeights weights, LLamaContext context, ModelConfig config)
     {
         _weights = weights;
+        _context = context;
         _config = config;
     }
 
@@ -61,43 +63,48 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
             GpuLayerCount = config.GpuLayers
         };
 
-        var weights = await Task.Run(
-            () => LLamaWeights.LoadFromFile(parameters),
-            cancellationToken);
+        var (weights, context) = await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var w = LLamaWeights.LoadFromFile(parameters);
+            var c = w.CreateContext(parameters);
+            return (w, c);
+        }, cancellationToken);
 
-        return new LlamaInferenceBackend(weights, config);
+        return new LlamaInferenceBackend(weights, context, config);
     }
 
     /// <inheritdoc />
     public async Task<uint> RunAsync(
         InferRequest request,
-        StreamWriter writer,
+        TextWriter writer,
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var parameters = new ModelParams(_config.Path)
-        {
-            ContextSize = (uint)_config.ContextSize,
-            GpuLayerCount = _config.GpuLayers
-        };
-
-        using var context = _weights.CreateContext(parameters);
-        var executor = new InstructExecutor(context);
+        var executor = new InteractiveExecutor(_context);
 
         var inferenceParams = new InferenceParams
         {
-            MaxTokens = request.MaxTokens > 0 ? (int)request.MaxTokens : 4096,
-            AntiPrompts = ["User:", "### User:", "\nUser:"]
+            // Ha a request tartalmaz max_tokens limitet, azt használjuk.
+            // Ha 0 (nincs megadva), a LLamaSharp int.MaxValue-t kap –
+            // a tényleges korlátot a context_size adja.
+            MaxTokens = request.MaxTokens > 0
+                ? (int)request.MaxTokens
+                : int.MaxValue,
+
+            AntiPrompts = ["\n\nUser:", "\n\nHuman:", "<|end|>", "<|eot_id|>"]
         };
 
-        var fullPrompt = $"{request.SystemPrompt}\n\n{request.UserInput}";
+        var prompt = $"<|system|>{request.SystemPrompt}<|end|>" +
+                     $"<|user|>{request.UserInput}<|end|>" +
+                     $"<|assistant|>";
+
         uint tokenCount = 0;
 
-        await foreach (var token in executor
-            .InferAsync(fullPrompt, inferenceParams, cancellationToken)
-            .ConfigureAwait(false))
+        await foreach (var token in executor.InferAsync(prompt, inferenceParams, cancellationToken))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             await writer.WriteAsync(token);
             await writer.FlushAsync(cancellationToken);
             tokenCount++;
@@ -106,11 +113,14 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
         return tokenCount;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        if (_disposed) return ValueTask.CompletedTask;
+        if (_disposed) return;
         _disposed = true;
-        _weights.Dispose();
-        return ValueTask.CompletedTask;
+        await Task.Run(() =>
+        {
+            _context.Dispose();
+            _weights.Dispose();
+        });
     }
 }

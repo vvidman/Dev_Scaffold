@@ -45,6 +45,23 @@ public class YamlStepAgentConfigReader : IStepAgentConfigReader
                 $"Agent konfiguráció nem található: {yamlPath}");
 
         var yaml = File.ReadAllText(yamlPath);
-        return _deserializer.Deserialize<StepAgentConfig>(yaml);
+        var config = _deserializer.Deserialize<StepAgentConfig>(yaml);
+        ValidateConfig(config, yamlPath);
+        return config;
+    }
+
+    private void ValidateConfig(StepAgentConfig config, string path)
+    {
+        if (string.IsNullOrWhiteSpace(config.Step))
+            throw new InvalidOperationException(
+                $"A step agent config 'step' mezője kötelező: {path}");
+
+        if (string.IsNullOrWhiteSpace(config.SystemPrompt))
+            throw new InvalidOperationException(
+                $"A step agent config 'system_prompt' mezője kötelező: {path}");
+
+        if (config.MaxTokens.HasValue && config.MaxTokens.Value <= 0)
+            throw new InvalidOperationException(
+                $"A 'max_tokens' értékének pozitívnak kell lennie: {path}");
     }
 }

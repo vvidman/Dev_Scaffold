@@ -18,6 +18,7 @@
 
 using Scaffold.Application.Interfaces;
 using Scaffold.Domain.Models;
+using System.Diagnostics;
 
 namespace Scaffold.CLI;
 
@@ -92,12 +93,7 @@ public class ConsoleHumanValidationService : IHumanValidationService
     {
         try
         {
-            var process = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = filePath,
-                UseShellExecute = true
-            };
-            System.Diagnostics.Process.Start(process);
+            Process.Start("notepad.exe", filePath);
         }
         catch (Exception ex)
         {

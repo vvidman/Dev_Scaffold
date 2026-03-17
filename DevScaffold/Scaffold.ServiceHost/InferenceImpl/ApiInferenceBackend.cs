@@ -16,82 +16,51 @@
 
  */
 
-using Scaffold.Agent.Protocol;
-using Scaffold.Domain.Models;
-using System.Net.Http.Json;
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Scaffold.Agent.Protocol;
+using Scaffold.Domain.Models;
 
-namespace Scaffold.ServiceHost.InferenceImpl;
+namespace Scaffold.ServiceHost;
 
 /// <summary>
-/// OpenAI-kompatibilis REST API alapú inference backend.
-/// Működik OpenAI, Anthropic proxy, Ollama és egyéb
-/// /v1/chat/completions végpontot kínáló szolgáltatásokkal.
+/// OpenAI-kompatibilis API inference backend.
+/// SSE streaming-et használ (stream: true).
 ///
-/// Konfiguráció a models.yaml-ban:
-///   path:       https://api.openai.com/v1/chat/completions
-///   model_name: gpt-4o
-///   api_key:    OPENAI_API_KEY   ← environment variable neve
-///
-/// A ModelCache azonnal létrehozza (nincs betöltési idő),
-/// az api_key értékét environment variable-ból olvassa fel.
+/// MaxTokens kezelés:
+/// - Ha az InferRequest.MaxTokens > 0, bekerül a request body-ba (max_tokens mező).
+/// - Ha 0, a mező kimarad – az API provider alapértelmezése érvényes.
 /// </summary>
 internal sealed class ApiInferenceBackend : IInferenceBackend
 {
-    private readonly HttpClient _httpClient;
     private readonly ModelConfig _config;
-    private bool _disposed;
+    private readonly HttpClient _httpClient;
 
     public ApiInferenceBackend(ModelConfig config, HttpClient httpClient)
     {
         _config = config;
         _httpClient = httpClient;
-
-        // API kulcs feloldása environment variable névből
-        if (!string.IsNullOrWhiteSpace(config.ApiKey))
-        {
-            var key = Environment.GetEnvironmentVariable(config.ApiKey) ?? string.Empty;
-
-            if (string.IsNullOrWhiteSpace(key))
-                Console.WriteLine(
-                    $"[ServiceHost] Figyelmeztetés: '{config.ApiKey}' " +
-                    $"environment variable nincs beállítva.");
-            else
-                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {key}");
-        }
     }
 
-    /// <inheritdoc />
     public async Task<uint> RunAsync(
         InferRequest request,
-        StreamWriter writer,
+        TextWriter writer,
         CancellationToken cancellationToken)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        var apiKey = ResolveApiKey();
 
-        var modelName = _config.ModelName
-            ?? throw new InvalidOperationException(
-                $"model_name nincs megadva a modell konfigurációban: {_config.Path}");
-
-        var maxTokens = request.MaxTokens > 0 ? (int)request.MaxTokens : 4096;
-
-        var requestBody = new
-        {
-            model = modelName,
-            stream = true,
-            max_tokens = maxTokens,
-            messages = new[]
-            {
-                new { role = "system", content = request.SystemPrompt },
-                new { role = "user",   content = request.UserInput }
-            }
-        };
+        var requestBody = BuildRequestBody(request);
+        var json = JsonSerializer.Serialize(requestBody, JsonOptions);
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _config.Path)
         {
-            Content = JsonContent.Create(requestBody)
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
+
+        if (!string.IsNullOrEmpty(apiKey))
+            httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
         using var response = await _httpClient.SendAsync(
             httpRequest,
@@ -105,7 +74,6 @@ internal sealed class ApiInferenceBackend : IInferenceBackend
 
         uint tokenCount = 0;
 
-        // Server-Sent Events olvasás – minden sor "data: {...}" formátumú
         string? line;
         while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
         {
@@ -115,12 +83,12 @@ internal sealed class ApiInferenceBackend : IInferenceBackend
             if (!line.StartsWith("data: ", StringComparison.Ordinal))
                 continue;
 
-            var json = line["data: ".Length..];
+            var data = line["data: ".Length..];
 
-            if (json == "[DONE]")
+            if (data == "[DONE]")
                 break;
 
-            var chunk = JsonSerializer.Deserialize<StreamChunk>(json);
+            var chunk = JsonSerializer.Deserialize<StreamChunk>(data, JsonOptions);
             var token = chunk?.Choices?.FirstOrDefault()?.Delta?.Content;
 
             if (string.IsNullOrEmpty(token))
@@ -134,24 +102,80 @@ internal sealed class ApiInferenceBackend : IInferenceBackend
         return tokenCount;
     }
 
-    public ValueTask DisposeAsync()
+    // ─────────────────────────────────────────────
+    // Request body összerakása
+    // ─────────────────────────────────────────────
+
+    private object BuildRequestBody(InferRequest request)
     {
-        // HttpClient lifecycle a ModelCache felelőssége –
-        // itt nem dispose-oljuk, mert megosztott instance
-        _disposed = true;
-        return ValueTask.CompletedTask;
+        var body = new RequestBody
+        {
+            Model = _config.ModelName ?? "gpt-4o",
+            Stream = true,
+            Messages =
+            [
+                new Message { Role = "system", Content = request.SystemPrompt },
+                new Message { Role = "user",   Content = request.UserInput   }
+            ]
+        };
+
+        // MaxTokens csak akkor kerül a requestbe ha explicit meg van adva.
+        // 0 = nincs limit (proto default érték).
+        if (request.MaxTokens > 0)
+            body.MaxTokens = (int)request.MaxTokens;
+
+        return body;
+    }
+
+    private string? ResolveApiKey()
+    {
+        if (string.IsNullOrEmpty(_config.ApiKey))
+            return null;
+
+        // ApiKey az env var neve, nem maga a kulcs
+        return Environment.GetEnvironmentVariable(_config.ApiKey);
     }
 
     // ─────────────────────────────────────────────
-    // SSE JSON deszializáló modellek
+    // JSON modellek
     // ─────────────────────────────────────────────
 
-    private record StreamChunk(
-        [property: JsonPropertyName("choices")] List<StreamChoice>? Choices);
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
-    private record StreamChoice(
-        [property: JsonPropertyName("delta")] StreamDelta? Delta);
+    private class RequestBody
+    {
+        public string Model { get; set; } = string.Empty;
+        public bool Stream { get; set; }
+        public List<Message> Messages { get; set; } = [];
 
-    private record StreamDelta(
-        [property: JsonPropertyName("content")] string? Content);
+        // Null ha nincs megadva – JsonIgnoreCondition.WhenWritingNull kihagyja
+        public int? MaxTokens { get; set; }
+    }
+
+    private class Message
+    {
+        public string Role { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
+    }
+
+    private class StreamChunk
+    {
+        public List<Choice>? Choices { get; set; }
+    }
+
+    private class Choice
+    {
+        public Delta? Delta { get; set; }
+    }
+
+    private class Delta
+    {
+        public string? Content { get; set; }
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

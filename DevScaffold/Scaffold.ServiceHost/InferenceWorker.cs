@@ -17,6 +17,7 @@
  */
 
 using Scaffold.Agent.Protocol;
+using System.Text;
 
 namespace Scaffold.ServiceHost;
 
@@ -47,7 +48,7 @@ public class InferenceWorker
     private CancellationTokenSource? _activeInferenceCts;
     private readonly SemaphoreSlim _inferenceLock = new(1, 1);
 
-    private static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(30);
 
     public InferenceWorker(
         ModelCache modelCache,
@@ -112,8 +113,8 @@ public class InferenceWorker
     // ─────────────────────────────────────────────
 
     private async Task ExecuteInferenceAsync(
-        InferRequest request,
-        CancellationToken cancellationToken)
+         InferRequest request,
+         CancellationToken cancellationToken)
     {
         var startTime = DateTime.UtcNow;
         var outputFilePath = BuildOutputPath(request.StepId, request.RequestId);
@@ -133,22 +134,29 @@ public class InferenceWorker
 
             Directory.CreateDirectory(Path.GetDirectoryName(outputFilePath)!);
 
+            // CountingTextWriter interceptálja a token írásokat –
+            // a progress timer olvassa a számlálót anélkül hogy a backend
+            // implementációt módosítani kellene.
             using var progressTimer = new PeriodicTimer(ProgressInterval);
-            var progressTask = RunProgressTimerAsync(
-                request.RequestId,
-                request.StepId,
-                startTime,
-                progressTimer,
-                cancellationToken);
 
             uint tokensGenerated;
-            await using (var writer = new StreamWriter(outputFilePath, append: false))
+            await using (var fileWriter = new StreamWriter(outputFilePath, append: false))
             {
-                tokensGenerated = await backend.RunAsync(request, writer, cancellationToken);
-            }
+                var countingWriter = new CountingTextWriter(fileWriter);
 
-            progressTimer.Dispose();
-            await progressTask;
+                var progressTask = RunProgressTimerAsync(
+                    request.RequestId,
+                    request.StepId,
+                    startTime,
+                    countingWriter,
+                    progressTimer,
+                    cancellationToken);
+
+                tokensGenerated = await backend.RunAsync(request, countingWriter, cancellationToken);
+
+                progressTimer.Dispose();
+                await progressTask;
+            }
 
             var elapsed = (uint)(DateTime.UtcNow - startTime).TotalSeconds;
 
@@ -182,6 +190,7 @@ public class InferenceWorker
         string requestId,
         string stepId,
         DateTime startTime,
+        CountingTextWriter countingWriter,
         PeriodicTimer timer,
         CancellationToken cancellationToken)
     {
@@ -189,14 +198,16 @@ public class InferenceWorker
         {
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                var elapsed = (uint)(DateTime.UtcNow - startTime).TotalSeconds;
+                var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
+                var tokens = countingWriter.TokenCount;
+                var tokensPerSec = elapsed > 0 ? tokens / elapsed : 0;
+
+                var statusMessage = tokens > 0
+                    ? $"Generálás folyamatban... {(uint)elapsed}mp | {tokens:N0} token | {tokensPerSec:F1} tok/s"
+                    : $"Generálás folyamatban... {(uint)elapsed}mp | modell betöltve, generálás indul";
 
                 await _eventPublisher.PublishInferenceProgressAsync(
-                    requestId,
-                    stepId,
-                    elapsed,
-                    "Generálás folyamatban...",
-                    cancellationToken);
+                    requestId, stepId, (uint)elapsed, statusMessage, cancellationToken);
             }
         }
         catch (OperationCanceledException) { }
@@ -205,10 +216,51 @@ public class InferenceWorker
     private string BuildOutputPath(string stepId, string requestId)
     {
         var shortId = requestId.Length >= 8 ? requestId[..8] : requestId;
+        return Path.Combine(_outputBasePath, stepId, $"{stepId}_{shortId}.md");
+    }
 
-        return Path.Combine(
-            _outputBasePath,
-            stepId,
-            $"{stepId}_{shortId}.md");
+    // ─────────────────────────────────────────────
+    // CountingTextWriter
+    // ─────────────────────────────────────────────
+
+    /// <summary>
+    /// TextWriter decorator ami megszámolja a backend WriteAsync hívásait.
+    /// Minden nem-üres WriteAsync hívás egy tokennek számít – ez közelítő érték,
+    /// de elegendő a tok/s kijelzéséhez.
+    ///
+    /// Thread-safe: Interlocked.Increment biztosítja a számlálót,
+    /// az összes többi hívás az inner writer-re delegál.
+    /// </summary>
+    private sealed class CountingTextWriter : TextWriter
+    {
+        private readonly TextWriter _inner;
+        private int _tokenCount;
+
+        public int TokenCount => _tokenCount;
+
+        public CountingTextWriter(TextWriter inner) => _inner = inner;
+
+        public override Encoding Encoding => _inner.Encoding;
+
+        public override async Task WriteAsync(string? value)
+        {
+            if (!string.IsNullOrEmpty(value))
+                Interlocked.Increment(ref _tokenCount);
+
+            await _inner.WriteAsync(value);
+        }
+
+        public override async Task WriteAsync(char value)
+        {
+            Interlocked.Increment(ref _tokenCount);
+            await _inner.WriteAsync(value);
+        }
+
+        public override Task FlushAsync() => _inner.FlushAsync();
+        public override Task FlushAsync(CancellationToken cancellationToken) =>
+            _inner.FlushAsync(cancellationToken);
+
+        // Dispose nem zárja be az inner writert – az InferenceWorker kezeli
+        protected override void Dispose(bool disposing) { }
     }
 }

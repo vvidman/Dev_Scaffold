@@ -25,7 +25,30 @@ namespace Scaffold.Domain.Models;
 /// </summary>
 public class StepAgentConfig
 {
-    public string Step { get; init; } = string.Empty;
-    public string SystemPrompt { get; init; } = string.Empty;
     public string OutputFormat { get; init; } = "markdown";
+
+    /// <summary>
+    /// A lépés azonosítója. Az output mappa nevét és az eseményeket is ez határozza meg.
+    /// </summary>
+    public required string Step { get; init; }
+
+    /// <summary>
+    /// Az AI rendszer promptja erre a lépésre.
+    /// Meghatározza az AI szerepét és viselkedési szabályait.
+    /// </summary>
+    public required string SystemPrompt { get; init; }
+
+    /// <summary>
+    /// Maximálisan generálható tokenek száma.
+    /// Védelmet nyújt a repetition loop ellen.
+    ///
+    /// Ajánlott értékek:
+    ///   task_breakdown:  800–1200
+    ///   code_generation: 2000–4000
+    ///   code_review:     1000–2000
+    ///   documentation:   1500–2500
+    ///
+    /// Ha nincs megadva (null), a backend alapértelmezése érvényes.
+    /// </summary>
+    public int? MaxTokens { get; init; }
 }

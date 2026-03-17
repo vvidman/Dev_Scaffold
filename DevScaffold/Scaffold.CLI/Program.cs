@@ -20,6 +20,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Scaffold.Agent.Protocol;
 using Scaffold.Application.Interfaces;
 using Scaffold.CLI;
+using Scaffold.Domain.Models;
 using Scaffold.Infrastructure.StepConfig;
 
 // ─────────────────────────────────────────────
@@ -36,6 +37,11 @@ using Scaffold.Infrastructure.StepConfig;
 //
 //   DevScaffold shutdown
 //                   [--pipe-name <név>]             (alapértelmezett: scaffold)
+//
+// Visszatérési kódok:
+//   0 – Accept vagy Edit (sikeres lépés)
+//   1 – Hiba (kapcsolódási probléma, parse hiba, váratlan kivétel)
+//   2 – Reject (a human visszaküldte, újragenerálás szükséges)
 // ─────────────────────────────────────────────
 
 var (mode, parsedArgs) = ParseArgs(Environment.GetCommandLineArgs()[1..]);
@@ -75,12 +81,12 @@ async Task<int> RunAsync(
         return 1;
 
     var stepConfigPath = args["--config"];
-    var inputYamlPath  = args["--input"];
-    var modelAlias     = args["--model"];
+    var inputYamlPath = args["--input"];
+    var modelAlias = args["--model"];
     var serviceHostPath = args["--host"];
-    var modelsYamlPath  = args["--models"];
-    var outputBasePath  = args.GetValueOrDefault("--output", "./output");
-    var pipeName        = args.GetValueOrDefault("--pipe-name", "scaffold");
+    var modelsYamlPath = args["--models"];
+    var outputBasePath = args.GetValueOrDefault("--output", "./output");
+    var pipeName = args.GetValueOrDefault("--pipe-name", "scaffold");
 
     // ─────────────────────────────────────────────
     // DI konténer
@@ -138,8 +144,15 @@ async Task<int> RunAsync(
 
         try
         {
-            await session.RunAsync(cancellationToken);
-            return 0;
+            var decision = await session.RunAsync(cancellationToken);
+
+            return decision.Outcome switch
+            {
+                ValidationOutcome.Accept => 0,
+                ValidationOutcome.Edit => 0,
+                ValidationOutcome.Reject => HandleReject(decision),
+                _ => 0
+            };
         }
         catch (Scaffold.Application.ScaffoldInputValidationException ex)
         {
@@ -164,6 +177,18 @@ async Task<int> RunAsync(
     }
 }
 
+static int HandleReject(ValidationDecision decision)
+{
+    Console.WriteLine("[SCAFFOLD] Lépés visszaküldve.");
+
+    if (!string.IsNullOrWhiteSpace(decision.RejectionClarification))
+        Console.WriteLine($"[SCAFFOLD] Pontosítás: {decision.RejectionClarification}");
+
+    // Exit 2 jelzi a hívónak (pl. shell script) hogy reject történt,
+    // nem hiba – újrafuttatás szükséges.
+    return 2;
+}
+
 // ─────────────────────────────────────────────
 // shutdown parancs
 // ─────────────────────────────────────────────
@@ -174,7 +199,6 @@ async Task<int> ShutdownAsync(
 {
     var pipeName = args.GetValueOrDefault("--pipe-name", "scaffold");
 
-    // Pipe existence check – ha nem él, a ServiceHost nem fut
     if (!File.Exists($@"\\.\pipe\{pipeName}-events"))
     {
         Console.WriteLine("[SCAFFOLD] ServiceHost nem fut.");
@@ -185,7 +209,6 @@ async Task<int> ShutdownAsync(
 
     await using (pipeClient)
     {
-        // Csatlakozás és ready várakozás (ServiceHost session loop fogadja)
         try
         {
             await pipeClient.ConnectAsync(cancellationToken);
@@ -206,7 +229,6 @@ async Task<int> ShutdownAsync(
             return 1;
         }
 
-        // ServiceShuttingDownEvent várakozás
         var shuttingDownTcs = new TaskCompletionSource();
         pipeClient.EventReceived += evt =>
         {
@@ -223,15 +245,13 @@ async Task<int> ShutdownAsync(
 
         Console.WriteLine("[SCAFFOLD] Leállítás elküldve. Várakozás visszaigazolásra...");
 
-        // Max 5 másodpercet várunk a visszaigazolásra
         await Task.WhenAny(
             shuttingDownTcs.Task,
             Task.Delay(TimeSpan.FromSeconds(5), cancellationToken));
 
-        if (shuttingDownTcs.Task.IsCompleted)
-            Console.WriteLine("[SCAFFOLD] ServiceHost leállítva.");
-        else
-            Console.WriteLine("[SCAFFOLD] Leállítás elküldve (visszaigazolás nem érkezett).");
+        Console.WriteLine(shuttingDownTcs.Task.IsCompleted
+            ? "[SCAFFOLD] ServiceHost leállítva."
+            : "[SCAFFOLD] Leállítás elküldve (visszaigazolás nem érkezett).");
 
         return 0;
     }
@@ -308,6 +328,11 @@ static void PrintHelp()
 
           DevScaffold shutdown
                           [--pipe-name <név>]
+
+        Visszatérési kódok:
+          0 – Accept vagy Edit
+          1 – Hiba
+          2 – Reject (újrafuttatás szükséges)
 
         """);
 }

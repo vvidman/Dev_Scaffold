@@ -1,6 +1,7 @@
 # ADR – Scaffold ServiceHost
 
 **Dátum:** 2026-03-06  
+**Frissítve:** 2026-03-17  
 **Státusz:** Elfogadott  
 **Érintett projektek:** Scaffold.ServiceHost
 
@@ -170,6 +171,24 @@ _dictionaryLock → cache hit? → return
 
 ---
 
+### 13. Output path meghatározás – CLI adja, ServiceHost fallback-kel
+
+**Döntés:** Az output fájl path-jának elsődleges forrása az `InferRequest.OutputFolder` mező, amelyet a CLI tölt ki. A ServiceHost ezt közvetlenül használja. Ha az `OutputFolder` üres (fallback eset), a ServiceHost a saját `--output` startup paraméteréből számítja a path-t.
+
+**Fájlnév képzés az `OutputFolder`-en belül:**
+```
+{OutputFolder}/{stepId}_{requestId[..8]}.md
+pl. /output/task_breakdown_2/task_breakdown_abc12345.md
+```
+
+**Indoklás:**
+- A generáció sorszám a CLI felelőssége (filesystem alapú számítás) – a ServiceHost nem tud erről
+- A ServiceHost csak azt a foldert kapja meg, amelybe írnia kell – nem kell ismernie a projekt struktúrát
+- A fallback (`--output`) visszafelé kompatibilitást biztosít, és lehetővé teszi a ServiceHost önálló tesztelését is
+- A konkrét fájl path az `InferenceCompletedEvent.output_file_path` mezőn keresztül jut vissza a CLI-hez, ahonnan az audit logba és a human validációba kerül
+
+---
+
 ## Komponens összefoglaló
 
 | Komponens | Egyetlen felelősség | Függőségei |
@@ -177,11 +196,12 @@ _dictionaryLock → cache hit? → return
 | `PipeServer` | Pipe lifecycle, session loop, command olvasás | `CommandDispatcher`, `EventPublisher` |
 | `EventPublisher` | Event pipe írás, thread-safe küldés | – (csak `NamedPipeServerStream`) |
 | `CommandDispatcher` | Parancs routing, shutdown jelzés | `InferenceWorker`, `ModelCache`, `EventPublisher` |
-| `InferenceWorker` | Inference futtatás, progress küldés | `ModelCache`, `EventPublisher` |
+| `InferenceWorker` | Inference futtatás, progress küldés, output fájl írás | `ModelCache`, `EventPublisher` |
 | `ModelCache` | Lazy modell betöltés, cache kezelés | `ModelRegistryConfig`, `LLamaWeights` |
 
 ---
 
 ## Kapcsolódó ADR-ek
 
-- **ADR-CLI-Refactor** – A CLI vékony kliens döntés, amely meghatározza hogy a ServiceHost mikor indul és mikor áll le
+- **ADR-CLI-Refactor** – A CLI vékony kliens döntés, amely meghatározza hogy a ServiceHost mikor indul és mikor áll le, és hogy a CLI határozza meg az output folder struktúrát
+- **ADR-Protocol** – Az `InferRequest.output_folder` mező indoklása

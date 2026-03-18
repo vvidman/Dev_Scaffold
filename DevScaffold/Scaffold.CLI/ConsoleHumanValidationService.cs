@@ -26,34 +26,49 @@ namespace Scaffold.CLI;
 /// Konzolos human validációs service implementáció.
 /// Megjeleníti a step kimenetét, bekéri a döntést, és
 /// Reject esetén a pontosítást is bekéri.
+///
+/// Konzol kimenet Yellow színnel az IScaffoldConsole-on keresztül –
+/// elkülönítve a CLI (Cyan) és Session (Gray) szintű üzenetektől.
+/// Az audit logolás a ScaffoldSession felelőssége – a döntés ott kerül rögzítésre.
 /// </summary>
 public class ConsoleHumanValidationService : IHumanValidationService
 {
+    private readonly IScaffoldConsole _console;
+
+    public ConsoleHumanValidationService(IScaffoldConsole console)
+    {
+        _console = console;
+    }
+
     public Task<ValidationDecision> ValidateAsync(
-    string stepId,
-    string outputFilePath)
+        string stepId,
+        string outputFilePath)
     {
         return Task.FromResult(ValidateSync(stepId, outputFilePath));
     }
 
-    private static ValidationDecision ValidateSync(string stepId, string outputFilePath)
+    private ValidationDecision ValidateSync(string stepId, string outputFilePath)
     {
-        Console.WriteLine("─────────────────────────────────────────────────");
-        Console.WriteLine($"[SCAFFOLD] Validáció szükséges: {stepId}");
-        Console.WriteLine($"[SCAFFOLD] Kimenet fájl: {outputFilePath}");
-        Console.WriteLine();
+        _console.WriteValidation("─────────────────────────────────────────────────");
+        _console.WriteValidation($"[VALIDATE] Validáció szükséges: {stepId}");
+        _console.WriteValidation($"[VALIDATE] Kimenet fájl: {outputFilePath}");
+        _console.WriteValidation(string.Empty);
 
-        // Fájl megnyitása szerkesztőben
-        Console.WriteLine("[SCAFFOLD] Megnyitom a kimenetet a szerkesztőben...");
+        _console.WriteValidation("[VALIDATE] Megnyitom a kimenetet a szerkesztőben...");
         OpenInEditor(outputFilePath);
 
-        Console.WriteLine();
-        Console.WriteLine("Döntés:");
-        Console.WriteLine("  [1] Accept  – Elfogadom, következő lépés");
-        Console.WriteLine("  [2] Edit    – Szerkesztettem, elfogadom a módosított verziót");
-        Console.WriteLine("  [3] Reject  – Visszaküldöm, pontosítással újragenerálás");
-        Console.WriteLine();
+        _console.WriteValidation(string.Empty);
+        _console.WriteValidation("Döntés:");
+        _console.WriteValidation("  [1] Accept  – Elfogadom, következő lépés");
+        _console.WriteValidation("  [2] Edit    – Szerkesztettem, elfogadom a módosított verziót");
+        _console.WriteValidation("  [3] Reject  – Visszaküldöm, pontosítással újragenerálás");
+        _console.WriteValidation(string.Empty);
+
+        // A prompt sor (Console.Write inline) nem kap külön szint-színt –
+        // a bevitel maga nem szintezhető, az input kurzor pozíciója ezt megköveteli.
+        Console.ForegroundColor = ConsoleColor.Yellow;
         Console.Write("Választás (1/2/3): ");
+        Console.ResetColor();
 
         while (true)
         {
@@ -62,25 +77,31 @@ public class ConsoleHumanValidationService : IHumanValidationService
             switch (key)
             {
                 case "1":
-                    Console.WriteLine();
+                    _console.WriteValidation(string.Empty);
                     return new ValidationDecision(ValidationOutcome.Accept);
 
                 case "2":
-                    Console.WriteLine();
+                    _console.WriteValidation(string.Empty);
                     return new ValidationDecision(ValidationOutcome.Edit);
 
                 case "3":
-                    Console.WriteLine();
-                    Console.WriteLine("Pontosítás (mit kell másképp csinálni?):");
+                    _console.WriteValidation(string.Empty);
+                    _console.WriteValidation("Pontosítás (mit kell másképp csinálni?):");
+
+                    Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.Write("> ");
+                    Console.ResetColor();
+
                     var clarification = Console.ReadLine() ?? string.Empty;
-                    Console.WriteLine();
+                    _console.WriteValidation(string.Empty);
                     return new ValidationDecision(
                         ValidationOutcome.Reject,
                         clarification);
 
                 default:
+                    Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.Write("Érvénytelen választás. Kérlek 1, 2 vagy 3: ");
+                    Console.ResetColor();
                     break;
             }
         }
@@ -89,7 +110,7 @@ public class ConsoleHumanValidationService : IHumanValidationService
     /// <summary>
     /// Megnyitja a fájlt az operációs rendszer alapértelmezett szövegszerkesztőjében.
     /// </summary>
-    private static void OpenInEditor(string filePath)
+    private void OpenInEditor(string filePath)
     {
         try
         {
@@ -97,8 +118,10 @@ public class ConsoleHumanValidationService : IHumanValidationService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[SCAFFOLD] Figyelmeztetés: nem sikerült megnyitni a szerkesztőt: {ex.Message}");
-            Console.WriteLine($"[SCAFFOLD] Nyisd meg manuálisan: {filePath}");
+            _console.WriteValidation(
+                $"[VALIDATE] Figyelmeztetés: nem sikerült megnyitni a szerkesztőt: {ex.Message}");
+            _console.WriteValidation(
+                $"[VALIDATE] Nyisd meg manuálisan: {filePath}");
         }
     }
 }

@@ -31,6 +31,10 @@ namespace Scaffold.ServiceHost;
 /// biztosítja ezt, és a WaitForCompletionAsync is ezt használja
 /// a graceful shutdown implementálásához.
 ///
+/// Output path meghatározás:
+/// - Ha az InferRequest.OutputFolder meg van adva, azt használja (CLI határozza meg)
+/// - Ha üres, fallback: _outputBasePath / stepId / (ServiceHost saját logikája)
+///
 /// Felelősségei:
 /// - Backend lekérése a ModelCache-ből (lazy betöltéssel)
 /// - Inference futtatása a backenden keresztül
@@ -117,7 +121,7 @@ public class InferenceWorker
          CancellationToken cancellationToken)
     {
         var startTime = DateTime.UtcNow;
-        var outputFilePath = BuildOutputPath(request.StepId, request.RequestId);
+        var outputFilePath = BuildOutputPath(request);
 
         await _eventPublisher.PublishInferenceStartedAsync(
             request.RequestId,
@@ -213,10 +217,26 @@ public class InferenceWorker
         catch (OperationCanceledException) { }
     }
 
-    private string BuildOutputPath(string stepId, string requestId)
+    /// <summary>
+    /// Meghatározza az output fájl path-ját.
+    ///
+    /// Ha az InferRequest OutputFolder meg van adva (CLI adja meg, generáció alapján),
+    /// azt használja – ez a normál működési mód.
+    ///
+    /// Ha OutputFolder üres (fallback, pl. régi kliensek kompatibilitásához),
+    /// a ServiceHost saját _outputBasePath-ját használja.
+    /// </summary>
+    private string BuildOutputPath(InferRequest request)
     {
-        var shortId = requestId.Length >= 8 ? requestId[..8] : requestId;
-        return Path.Combine(_outputBasePath, stepId, $"{stepId}_{shortId}.md");
+        var shortId = request.RequestId.Length >= 8
+            ? request.RequestId[..8]
+            : request.RequestId;
+
+        var folder = !string.IsNullOrEmpty(request.OutputFolder)
+            ? request.OutputFolder
+            : Path.Combine(_outputBasePath, request.StepId);
+
+        return Path.Combine(folder, $"{request.StepId}_{shortId}.md");
     }
 
     // ─────────────────────────────────────────────

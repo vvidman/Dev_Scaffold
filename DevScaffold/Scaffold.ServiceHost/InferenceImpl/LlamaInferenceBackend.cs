@@ -105,6 +105,11 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
         await foreach (var token in executor.InferAsync(prompt, inferenceParams, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            // Stop token szivárgás megelőzése
+            if (inferenceParams.AntiPrompts.Any(ap => token.Contains(ap)))
+                break;
+
             await writer.WriteAsync(token);
             await writer.FlushAsync(cancellationToken);
             tokenCount++;

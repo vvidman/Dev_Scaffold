@@ -1,6 +1,7 @@
 # ADR – Scaffold.Agent.Protocol
 
 **Dátum:** 2026-03-04  
+**Frissítve:** 2026-03-17  
 **Státusz:** Elfogadott  
 **Érintett projektek:** Scaffold.Agent.Protocol, Scaffold.ServiceHost, Scaffold.CLI
 
@@ -55,7 +56,7 @@ A `Scaffold.Agent.Protocol` projekt tartalmazza a CLI és a ServiceHost között
 
 ### 4. inference.proto – InferRequest tartalom
 
-**Döntés:** Az `InferRequest` a következőket tartalmazza: `request_id`, `step_id`, `model_alias`, `system_prompt`, `user_input`, `max_tokens`.
+**Döntés:** Az `InferRequest` a következőket tartalmazza: `request_id`, `step_id`, `model_alias`, `system_prompt`, `user_input`, `max_tokens`, `output_folder`.
 
 **Mezőnkénti indoklás:**
 
@@ -67,15 +68,19 @@ A `Scaffold.Agent.Protocol` projekt tartalmazza a CLI és a ServiceHost között
 | `system_prompt` | Az agent szerepe – step agent config yaml-ból jön |
 | `user_input` | Az InputAssembler kimenete – input yaml + összes hivatkozott fájl tartalma |
 | `max_tokens` | 0 esetén ServiceHost alapértelmezett – rugalmas, nem kell mindig megadni |
+| `output_folder` | A CLI által meghatározott step output folder – generáció sorszámot tartalmaz |
 
 **Miért nincs benne a modell path közvetlenül:**
 - A path a ServiceHost belső implementációs részlete
 - Az alias absztrakcióval a CLI nem tud a fájlrendszer struktúráról
 - A models.yaml mapping egy helyen él – könnyebb karbantartani
 
-**Miért nincs benne az output path:**
-- Az output path a ServiceHost felelőssége – ő tudja az `--output` bázis mappát
-- A CLI az `InferenceCompletedEvent`-ből kapja vissza a tényleges output path-t
+**Miért kerül az output_folder a CLI-ből a ServiceHost-nak (és nem fordítva):**
+- A generáció sorszám kiszámítása CLI felelősség – a CLI ismeri a projekt output struktúrát
+- A CLI számolja meg hány `{stepId}_*` folder létezik már, és létrehozza a következőt
+- A ServiceHost-nak nem kell tudnia a generációkról – csak azt a foldert használja amit kap
+- Ha az `output_folder` üres, a ServiceHost fallback-ként a saját `--output` paraméteréből számít path-t (visszafelé kompatibilitás)
+- A CLI az `InferenceCompletedEvent`-ből kapja vissza a tényleges output fájl path-ját
 
 ---
 
@@ -188,8 +193,9 @@ A `Scaffold.Agent.Protocol` projekt tartalmazza a CLI és a ServiceHost között
 
 **Indoklás:**
 - A CLI-nek tudnia kell hol van a generált kimenet fájl a human validációhoz
-- A ServiceHost határozza meg az output path-t (`--output` + step_id + request_id) – a CLI nem tudja előre
+- A ServiceHost határozza meg a konkrét fájlnevet (`{stepId}_{requestId[..8]}.md`) az `output_folder`-en belül
 - A CLI ezt a path-t adja át a `ConsoleHumanValidationService`-nek a fájl megnyitáshoz
+- Az audit logba is ez a path kerül bejegyzésre
 
 ---
 

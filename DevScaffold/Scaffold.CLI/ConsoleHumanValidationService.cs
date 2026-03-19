@@ -78,11 +78,11 @@ public class ConsoleHumanValidationService : IHumanValidationService
             {
                 case "1":
                     _console.WriteValidation(string.Empty);
-                    return new ValidationDecision(ValidationOutcome.Accept);
+                    return new ValidationDecision(ValidationOutcome.Accept, outputFilePath);
 
                 case "2":
                     _console.WriteValidation(string.Empty);
-                    return new ValidationDecision(ValidationOutcome.Edit);
+                    return new ValidationDecision(ValidationOutcome.Edit, outputFilePath);
 
                 case "3":
                     _console.WriteValidation(string.Empty);

@@ -22,6 +22,10 @@ using Scaffold.Application.Interfaces;
 using Scaffold.CLI;
 using Scaffold.Domain.Models;
 using Scaffold.Infrastructure.StepConfig;
+using Scaffold.Validation;
+using Scaffold.Validation.Abstract;
+using Scaffold.Validation.Steps;
+using Scaffold.Validation.Validators;
 
 // ─────────────────────────────────────────────
 // DevScaffold CLI
@@ -97,6 +101,13 @@ async Task<int> RunAsync(
     services.AddSingleton<IStepAgentConfigReader, YamlStepAgentConfigReader>();
     services.AddSingleton<IInputAssembler, InputAssembler>();
     services.AddSingleton<IHumanValidationService, ConsoleHumanValidationService>();
+    // Validation réteg
+    // UniversalOutputValidator szándékosan NEM kerül DI-ba –
+    // belső komponens, a CompositeOutputValidator példányosítja.
+    services.AddSingleton<IStepOutputValidator, TaskBreakdownValidator>();
+    services.AddSingleton(sp => new StepValidatorRegistry(sp.GetServices<IStepOutputValidator>()));
+    services.AddSingleton<IOutputValidator, CompositeOutputValidator>();
+    services.AddSingleton<ValidatorYamlReader>();
     var provider = services.BuildServiceProvider();
 
     var scaffoldConsole = provider.GetRequiredService<IScaffoldConsole>();
@@ -193,7 +204,9 @@ async Task<int> RunAsync(
             inputYamlPath: inputYamlPath,
             modelAlias: modelAlias,
             stepOutputFolder: stepOutputFolder,
-            generation: generation);
+            generation: generation,
+            outputValidator: provider.GetRequiredService<IOutputValidator>(),
+            validatorYamlReader: provider.GetRequiredService<ValidatorYamlReader>());
 
         try
         {

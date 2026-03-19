@@ -10,6 +10,8 @@
     <ProjectReference Include="..\Scaffold.Domain\Scaffold.Domain.csproj" />
     <ProjectReference Include="..\Scaffold.Application\Scaffold.Application.csproj" />
     <ProjectReference Include="..\Scaffold.Infrastructure.StepConfig\Scaffold.Infrastructure.StepConfig.csproj" />
+    <ProjectReference Include="..\Scaffold.Validation.Steps\Scaffold.Validation.Steps.csproj" />
+    <ProjectReference Include="..\Scaffold.Validation\Scaffold.Validation.csproj" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.3" />
   </ItemGroup>
 </Project>

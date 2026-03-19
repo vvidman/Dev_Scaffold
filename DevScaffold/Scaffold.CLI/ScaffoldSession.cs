@@ -20,6 +20,8 @@ using Scaffold.Agent.Protocol;
 using Scaffold.Application;
 using Scaffold.Application.Interfaces;
 using Scaffold.Domain.Models;
+using Scaffold.Validation;
+using Scaffold.Validation.Abstract;
 
 namespace Scaffold.CLI;
 
@@ -42,6 +44,10 @@ public class ScaffoldSession : IAsyncDisposable
     private readonly IHumanValidationService _humanValidation;
     private readonly IAuditLogger _auditLogger;
     private readonly IScaffoldConsole _console;
+    private readonly IOutputValidator _outputValidator;
+    private readonly ValidatorYamlReader _validatorYamlReader;
+
+
     private readonly string _stepConfigPath;
     private readonly string _inputYamlPath;
     private readonly string _modelAlias;
@@ -59,7 +65,9 @@ public class ScaffoldSession : IAsyncDisposable
         string inputYamlPath,
         string modelAlias,
         string stepOutputFolder,
-        int generation)
+        int generation,
+        IOutputValidator outputValidator,        
+        ValidatorYamlReader validatorYamlReader)
     {
         _pipeClient = pipeClient;
         _configReader = configReader;
@@ -72,18 +80,13 @@ public class ScaffoldSession : IAsyncDisposable
         _modelAlias = modelAlias;
         _stepOutputFolder = stepOutputFolder;
         _generation = generation;
+        _outputValidator = outputValidator;
+        _validatorYamlReader = validatorYamlReader;
     }
 
-    /// <summary>
-    /// Lefuttatja a lépést és visszaadja a human validáció döntését.
-    /// A hívónak (Program.cs) kell kezelni az Outcome-ot:
-    ///   Accept / Edit → sikeres futás (exit 0)
-    ///   Reject        → újragenerálás vagy kilépés (exit 2)
-    /// </summary>
     public async Task<ValidationDecision> RunAsync(CancellationToken cancellationToken = default)
     {
         var startTime = DateTime.UtcNow;
-
         var agentConfig = _configReader.Load(_stepConfigPath);
 
         _auditLogger.Log(AuditEvent.SessionStart,
@@ -95,33 +98,98 @@ public class ScaffoldSession : IAsyncDisposable
             $"max_tokens={agentConfig.MaxTokens?.ToString() ?? "default"} " +
             $"output_folder={_stepOutputFolder}");
 
+        var validatorYamlPath = ValidatorYamlReader.ResolveValidatorPath(
+            _stepConfigPath, agentConfig.Step);
+        var ruleSet = _validatorYamlReader.TryLoad(validatorYamlPath);
+
         var assembledInput = _inputAssembler.Assemble(_inputYamlPath, agentConfig.Step);
 
-        var request = new InferRequest
+        // Refinement state – null az első futáson
+        string? refinementClarification = null;
+        var attemptNumber = 0;
+
+        ValidationDecision decision = new(ValidationOutcome.NotValidated, "");
+        const int MaxAttempts = 5;
+
+        while (true)
         {
-            RequestId = Guid.NewGuid().ToString("N"),
-            StepId = agentConfig.Step,
-            ModelAlias = _modelAlias,
-            SystemPrompt = agentConfig.SystemPrompt,
-            UserInput = assembledInput,
-            MaxTokens = (uint)(agentConfig.MaxTokens ?? 0),
-            OutputFolder = _stepOutputFolder
-        };
+            if (attemptNumber >= MaxAttempts)
+            {
+                _console.WriteSession(
+                    $"[SESSION] Maximum kísérletszám elérve ({MaxAttempts}). " +
+                    "Human beavatkozás szükséges.");
+                _auditLogger.Log(AuditEvent.Error,
+                    $"reason=max_attempts_reached attempts={attemptNumber}");
 
-        _auditLogger.Log(AuditEvent.InferenceStart,
-            $"request_id={request.RequestId} step={request.StepId} model={request.ModelAlias}");
+                if (decision.Outcome != ValidationOutcome.NotValidated)
+                {
+                    // Human elé kerül a döntés – nem dobjuk el a munkát
+                    return await _humanValidation.ValidateAsync(agentConfig.Step, decision.ValidatedOutputFilePath);
+                }
 
-        await _pipeClient.SendAsync(
-            new CommandEnvelope { Infer = request },
-            cancellationToken);
+                // Első kísérlet sem futott le – nem várható érvényes kimenet
+                throw new InvalidOperationException(
+                    $"Maximum kísérletszám elérve ({MaxAttempts}) érvényes kimenet nélkül.");
+            }
 
-        var decision = await WaitForCompletionAsync(request, startTime, cancellationToken);
+            attemptNumber++;
 
-        var totalElapsed = (uint)(DateTime.UtcNow - startTime).TotalSeconds;
-        _auditLogger.Log(AuditEvent.SessionEnd,
-            $"total_elapsed={totalElapsed}s outcome={decision.Outcome}");
+            // System prompt kiegészítése refinement kontextussal (2. futástól)
+            var effectiveSystemPrompt = refinementClarification is not null
+                ? BuildRefinedSystemPrompt(agentConfig.SystemPrompt, refinementClarification)
+                : agentConfig.SystemPrompt;
 
-        return decision;
+            var request = new InferRequest
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                StepId = agentConfig.Step,
+                ModelAlias = _modelAlias,
+                SystemPrompt = effectiveSystemPrompt,
+                UserInput = assembledInput,
+                MaxTokens = (uint)(agentConfig.MaxTokens ?? 0),
+                OutputFolder = _stepOutputFolder
+            };
+
+            if (attemptNumber > 1)
+                _console.WriteSession($"[SESSION] Refinement futás #{attemptNumber}");
+
+            _auditLogger.Log(AuditEvent.InferenceStart,
+                $"request_id={request.RequestId} step={request.StepId} " +
+                $"model={request.ModelAlias} attempt={attemptNumber}");
+
+            await _pipeClient.SendAsync(
+                new CommandEnvelope { Infer = request },
+                cancellationToken);
+
+            decision = await WaitForCompletionAsync(
+                request, agentConfig, ruleSet, cancellationToken);
+
+            // Auto-reject: a WaitForCompletionAsync adja vissza a violation clarification-t
+            if (decision.Outcome == ValidationOutcome.Reject
+                && decision.RejectionClarification?.StartsWith("[AUTO]") == true)
+            {
+                refinementClarification = decision.RejectionClarification;
+                _console.WriteSession(
+                    $"[SESSION] Auto-reject #{attemptNumber} – refinement következik.");                
+                continue;
+            }
+
+            // Human reject: a human pontosítása lesz a refinement alap
+            if (decision.Outcome == ValidationOutcome.Reject)
+            {
+                refinementClarification = decision.RejectionClarification;
+                _console.WriteSession(
+                    $"[SESSION] Human reject #{attemptNumber} – refinement következik.");
+                continue;
+            }
+
+            // Accept vagy Edit: kilépés a loop-ból
+            var totalElapsed = (uint)(DateTime.UtcNow - startTime).TotalSeconds;
+            _auditLogger.Log(AuditEvent.SessionEnd,
+                $"total_elapsed={totalElapsed}s outcome={decision.Outcome} attempts={attemptNumber}");
+
+            return decision;
+        }
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -132,12 +200,13 @@ public class ScaffoldSession : IAsyncDisposable
 
     private async Task<ValidationDecision> WaitForCompletionAsync(
         InferRequest request,
-        DateTime startTime,
+        StepAgentConfig agentConfig, 
+        ValidatorRuleSet? ruleSet,   
         CancellationToken cancellationToken)
     {
         var completionTcs = new TaskCompletionSource<ValidationDecision>();
 
-        _pipeClient.EventReceived += async evt =>
+        Func<EventEnvelope, Task> handler = async evt =>
         {
             switch (evt.EventCase)
             {
@@ -170,6 +239,39 @@ public class ScaffoldSession : IAsyncDisposable
                             $"{completed.TokensGenerated:N0} token | " +
                             $"{completed.ElapsedSeconds}s | " +
                             $"{TokPerSec(completed.TokensGenerated, completed.ElapsedSeconds):F1} tok/s");
+
+                        // ── VALIDATION ────────────────────────────────────────────
+                        var outputContent = await File.ReadAllTextAsync(completed.OutputFilePath);
+
+                        var validationResult = _outputValidator.Validate(
+                            outputContent,
+                            request.StepId,
+                            agentConfig.MaxTokens,
+                            (int)completed.TokensGenerated,
+                            ruleSet);
+
+                        if (!validationResult.Passed)
+                        {
+                            _console.WriteValidation("[VALIDATE] Automatikus validáció sikertelen – auto-reject.");
+
+                            foreach (var error in validationResult.Errors)
+                            {
+                                _console.WriteValidation($"[VALIDATE] [{error.RuleId}] {error.Description}");
+                                _auditLogger.Log(AuditEvent.Error,
+                                    $"reason=auto_validation rule={error.RuleId} " +
+                                    $"description=\"{error.Description.Replace("\"", "'")}\"");
+                            }
+
+                            var autoRejectClarification = BuildAutoRejectClarification(validationResult);
+                            completionTcs.TrySetResult(
+                                new ValidationDecision(ValidationOutcome.Reject, completed.OutputFilePath, autoRejectClarification));
+                            return;
+                        }
+
+                        // Warning-ok megjelenítése human döntése előtt
+                        foreach (var warning in validationResult.Warnings)
+                            _console.WriteValidation($"[VALIDATE WARNING] [{warning.RuleId}] {warning.Description}");
+                        // ── END VALIDATION ────────────────────────────────────────
 
                         var decision = await _humanValidation.ValidateAsync(
                             request.StepId,
@@ -204,7 +306,15 @@ public class ScaffoldSession : IAsyncDisposable
             }
         };
 
-        return await completionTcs.Task.WaitAsync(cancellationToken);
+        _pipeClient.EventReceived += handler;
+        try
+        {
+            return await completionTcs.Task.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            _pipeClient.EventReceived -= handler;  // ← mindig leiratkozik, kivétel esetén is
+        }
     }
 
     private static double TokPerSec(uint tokens, uint elapsedSeconds) =>
@@ -223,5 +333,42 @@ public class ScaffoldSession : IAsyncDisposable
         }
 
         return base_;
+    }
+
+    private static string BuildAutoRejectClarification(OutputValidationResult result)
+    {
+        var hints = result.Errors
+            .Where(e => e.FixHint is not null)
+            .Select(e => $"- [{e.RuleId}] {e.FixHint}")
+            .ToList();
+
+        var body = hints.Count > 0
+            ? string.Join("\n", hints)
+            : "Automatic validation failed – see audit log for details.";
+
+        return $"[AUTO]\n{body}";
+    }
+
+    private static string BuildRefinedSystemPrompt(
+        string originalSystemPrompt,
+        string refinementClarification)
+    {
+        // Az [AUTO] prefix jelzi hogy automatikus validator generálta,
+        // a human pontosítás nem tartalmaz prefixet.
+        var isAutoRefinement = refinementClarification.StartsWith("[AUTO]");
+        var clarificationText = isAutoRefinement
+            ? refinementClarification["[AUTO]".Length..].Trim()
+            : refinementClarification;
+
+        var header = isAutoRefinement
+            ? "The previous attempt was automatically rejected due to rule violations."
+            : "The previous attempt was rejected by the human reviewer.";
+
+        return $"{originalSystemPrompt}\n\n" +
+               $"--- REFINEMENT CONTEXT ---\n" +
+               $"{header}\n" +
+               $"You MUST fix the following issues in this attempt:\n" +
+               $"{clarificationText}\n" +
+               $"--- END REFINEMENT CONTEXT ---";
     }
 }

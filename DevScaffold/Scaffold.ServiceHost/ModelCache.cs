@@ -191,7 +191,7 @@ public class ModelCache : IAsyncDisposable
         {
             IInferenceBackend backend = IsApiEndpoint(config.Path)
                 ? new ApiInferenceBackend(config, _httpClient)
-                : await LlamaInferenceBackend.LoadAsync(config, cancellationToken);
+                : await LlamaInferenceBackend.LoadStatelessAsync(config, cancellationToken);
 
             await _dictionaryLock.WaitAsync(cancellationToken);
             try

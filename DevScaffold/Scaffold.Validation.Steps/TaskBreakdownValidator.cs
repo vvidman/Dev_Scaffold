@@ -46,13 +46,6 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
         "Description"
     ];
 
-    // Alapértelmezett forbidden affected files
-    private static readonly string[] DefaultForbiddenAffectedFiles =
-    [
-        "IRepository.cs",
-        "Repository.cs"
-    ];
-
     // Alapértelmezett task count korlátok
     private const int DefaultTaskCountMin = 1;
     private const int DefaultTaskCountMax = 15;
@@ -76,11 +69,11 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
             ? rules.RequiredFields
             : [.. DefaultRequiredFields];
 
-        var forbiddenFiles = rules?.ForbiddenAffectedFiles.Count > 0
-            ? rules.ForbiddenAffectedFiles
-            : [.. DefaultForbiddenAffectedFiles];
+        var forbiddenFiles = rules?.ForbiddenAffectedFiles ?? [];
 
         var forbiddenKeywords = rules?.ForbiddenKeywords ?? [];
+
+        var warningKeywords = rules?.WarningKeywords ?? [];
 
         var taskCountMin = rules?.TaskCount?.Min ?? DefaultTaskCountMin;
         var taskCountMax = rules?.TaskCount?.Max ?? DefaultTaskCountMax;
@@ -91,6 +84,8 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
         CheckRequiredFields(tasks, requiredFields, violations);
         CheckForbiddenAffectedFiles(outputContent, forbiddenFiles, violations);
         CheckForbiddenKeywords(outputContent, forbiddenKeywords, violations);
+        CheckWarningKeywords(outputContent, warningKeywords, violations);
+
         CheckDuplicateHeadings(tasks, violations);
 
         return violations;
@@ -185,6 +180,23 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
                     Severity: ViolationSeverity.Error,
                     FixHint: $"A kimenet tartalmazza a tiltott \"{keyword}\" kifejezést. "
                            + "Távolítsd el az erre vonatkozó taskot vagy fogalmazd át."));
+        }
+    }
+
+    private static void CheckWarningKeywords(
+        string content,
+        IReadOnlyList<string> warningKeywords,
+        List<ValidationViolation> violations)
+    {
+        foreach (var keyword in warningKeywords)
+        {
+            if (content.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                violations.Add(new ValidationViolation(
+                    RuleId: "WARNING_KEYWORD",
+                    Layer: "StepSpecific",
+                    Description: $"Gyanús kulcsszó a kimentben: \"{keyword}\".",
+                    Severity: ViolationSeverity.Warning,
+                    FixHint: $"A kimenet tartalmaz gyanús \"{keyword}\" kifejezést. Humán dönti el hiba-e."));
         }
     }
 

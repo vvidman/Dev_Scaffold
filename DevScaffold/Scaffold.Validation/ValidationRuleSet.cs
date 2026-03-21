@@ -41,8 +41,11 @@ public class ValidatorRules
     /// <summary>Szavak/kifejezések amik jelenléte constraint-sértést jelez.</summary>
     public List<string> ForbiddenKeywords { get; init; } = [];
 
-    /// <summary>Fájlok amik nem szerepelhetnek "Affected files" alatt.</summary>
+    /// <summary>Fájlok amik nem szerepelhetnek "Affected files" alatt. (opcionális)</summary>
     public List<string> ForbiddenAffectedFiles { get; init; } = [];
+
+    /// <summary>Figyelmeztetők (Warning – nem auto-reject, human elé kerül) (opcionális)</summary>
+    public List<string> WarningKeywords { get; init; } = [];
 
     /// <summary>Elvárt mező-sorrend (opcionális).</summary>
     public List<string> FieldOrder { get; init; } = [];

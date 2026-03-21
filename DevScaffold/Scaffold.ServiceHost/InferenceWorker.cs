@@ -200,18 +200,27 @@ public class InferenceWorker
     {
         try
         {
+            bool startGenMessageSent = false;
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
                 var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
                 var tokens = countingWriter.TokenCount;
                 var tokensPerSec = elapsed > 0 ? tokens / elapsed : 0;
 
-                var statusMessage = tokens > 0
-                    ? $"Generálás folyamatban... {(uint)elapsed}mp | {tokens:N0} token | {tokensPerSec:F1} tok/s"
-                    : $"Generálás folyamatban... {(uint)elapsed}mp | modell betöltve, generálás indul";
+                string statusMessage = "";
+                if (tokens > 0)
+                    statusMessage = $"Generálás folyamatban... {(uint)elapsed}mp | {tokens:N0} token | {tokensPerSec:F1} tok/s";
+                else if (!startGenMessageSent)
+                {
+                    startGenMessageSent = true;
+                    statusMessage = $"Generálás folyamatban... {(uint)elapsed}mp | modell betöltve, generálás indul";
+                }
 
-                await _eventPublisher.PublishInferenceProgressAsync(
-                    requestId, stepId, (uint)elapsed, statusMessage, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(statusMessage))
+                {
+                    await _eventPublisher.PublishInferenceProgressAsync(
+                        requestId, stepId, (uint)elapsed, statusMessage, cancellationToken);
+                }
             }
         }
         catch (OperationCanceledException) { }

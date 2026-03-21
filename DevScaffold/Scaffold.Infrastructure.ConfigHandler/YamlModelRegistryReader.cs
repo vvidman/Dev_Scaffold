@@ -21,16 +21,16 @@ using Scaffold.Domain.Models;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
-namespace Scaffold.Infrastructure.StepConfig;
+namespace Scaffold.Infrastructure.ConfigHandler;
 
 /// <summary>
-/// YAML alapú agent step konfiguráció olvasó.
+/// YAML alapú modell registry olvasó.
 /// </summary>
-public class YamlStepAgentConfigReader : IStepAgentConfigReader
+public class YamlModelRegistryReader : IModelRegistryReader
 {
     private readonly IDeserializer _deserializer;
 
-    public YamlStepAgentConfigReader()
+    public YamlModelRegistryReader()
     {
         _deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
@@ -38,30 +38,13 @@ public class YamlStepAgentConfigReader : IStepAgentConfigReader
             .Build();
     }
 
-    public StepAgentConfig Load(string yamlPath)
+    public ModelRegistryConfig Load(string yamlPath)
     {
         if (!File.Exists(yamlPath))
             throw new FileNotFoundException(
-                $"Agent konfiguráció nem található: {yamlPath}");
+                $"Modell registry nem található: {yamlPath}");
 
         var yaml = File.ReadAllText(yamlPath);
-        var config = _deserializer.Deserialize<StepAgentConfig>(yaml);
-        ValidateConfig(config, yamlPath);
-        return config;
-    }
-
-    private void ValidateConfig(StepAgentConfig config, string path)
-    {
-        if (string.IsNullOrWhiteSpace(config.Step))
-            throw new InvalidOperationException(
-                $"A step agent config 'step' mezője kötelező: {path}");
-
-        if (string.IsNullOrWhiteSpace(config.SystemPrompt))
-            throw new InvalidOperationException(
-                $"A step agent config 'system_prompt' mezője kötelező: {path}");
-
-        if (config.MaxTokens.HasValue && config.MaxTokens.Value <= 0)
-            throw new InvalidOperationException(
-                $"A 'max_tokens' értékének pozitívnak kell lennie: {path}");
+        return _deserializer.Deserialize<ModelRegistryConfig>(yaml);
     }
 }

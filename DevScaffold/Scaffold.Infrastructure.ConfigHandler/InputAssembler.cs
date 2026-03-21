@@ -20,7 +20,7 @@ using Scaffold.Application;
 using Scaffold.Application.Interfaces;
 using YamlDotNet.RepresentationModel;
 
-namespace Scaffold.Infrastructure.StepConfig;
+namespace Scaffold.Infrastructure.ConfigHandler;
 
 /// <summary>
 /// Input YAML fájl összeszereléséért felelős implementáció.

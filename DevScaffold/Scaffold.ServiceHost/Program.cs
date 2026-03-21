@@ -17,7 +17,7 @@
  */
 
 using Scaffold.Domain.Models;
-using Scaffold.Infrastructure.StepConfig;
+using Scaffold.Infrastructure.ConfigHandler;
 using Scaffold.ServiceHost;
 
 // ─────────────────────────────────────────────

@@ -21,16 +21,16 @@ using Scaffold.Domain.Models;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
-namespace Scaffold.Infrastructure.StepConfig;
+namespace Scaffold.Infrastructure.ConfigHandler;
 
 /// <summary>
-/// YAML alapú modell registry olvasó.
+/// YAML alapú agent step konfiguráció olvasó.
 /// </summary>
-public class YamlModelRegistryReader : IModelRegistryReader
+public class YamlStepAgentConfigReader : IStepAgentConfigReader
 {
     private readonly IDeserializer _deserializer;
 
-    public YamlModelRegistryReader()
+    public YamlStepAgentConfigReader()
     {
         _deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
@@ -38,13 +38,30 @@ public class YamlModelRegistryReader : IModelRegistryReader
             .Build();
     }
 
-    public ModelRegistryConfig Load(string yamlPath)
+    public StepAgentConfig Load(string yamlPath)
     {
         if (!File.Exists(yamlPath))
             throw new FileNotFoundException(
-                $"Modell registry nem található: {yamlPath}");
+                $"Agent konfiguráció nem található: {yamlPath}");
 
         var yaml = File.ReadAllText(yamlPath);
-        return _deserializer.Deserialize<ModelRegistryConfig>(yaml);
+        var config = _deserializer.Deserialize<StepAgentConfig>(yaml);
+        ValidateConfig(config, yamlPath);
+        return config;
+    }
+
+    private void ValidateConfig(StepAgentConfig config, string path)
+    {
+        if (string.IsNullOrWhiteSpace(config.Step))
+            throw new InvalidOperationException(
+                $"A step agent config 'step' mezője kötelező: {path}");
+
+        if (string.IsNullOrWhiteSpace(config.SystemPrompt))
+            throw new InvalidOperationException(
+                $"A step agent config 'system_prompt' mezője kötelező: {path}");
+
+        if (config.MaxTokens.HasValue && config.MaxTokens.Value <= 0)
+            throw new InvalidOperationException(
+                $"A 'max_tokens' értékének pozitívnak kell lennie: {path}");
     }
 }

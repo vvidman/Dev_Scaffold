@@ -41,4 +41,5 @@ public interface IHumanValidationService
 /// </summary>
 public record ValidationDecision(
     ValidationOutcome Outcome,
+    string ValidatedOutputFilePath,
     string? RejectionClarification = null);

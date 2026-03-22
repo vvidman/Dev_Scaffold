@@ -1,4 +1,4 @@
-/*
+﻿/*
 
    Copyright 2026 Viktor Vidman
 
@@ -16,31 +16,23 @@
 
  */
 
-namespace Scaffold.Domain.Models;
+namespace Scaffold.Validation.Abstractions;
 
 /// <summary>
-/// Human validáció lehetséges kimenetei minden step után.
+/// Per-step validációs logika.
+/// Minden step típushoz egy dedikált implementáció készül.
+/// Ha egy step_id-hoz nincs regisztrált validator, csak az UniversalOutputValidator fut.
 /// </summary>
-public enum ValidationOutcome
+public interface IStepOutputValidator
 {
-    /// <summary>
-    /// A kimenet még nem volt értkelve
-    /// </summary>
-    NotValidated,
+    /// <summary>Egyeznie kell a step agent config step mezőjével.</summary>
+    string StepId { get; }
 
     /// <summary>
-    /// A kimenet megfelelő, mehet a következő lépésre.
+    /// Step-specifikus ellenőrzések futtatása.
+    /// Csak a saját step-re vonatkozó violation-öket adja vissza.
     /// </summary>
-    Accept,
-
-    /// <summary>
-    /// Human szerkesztette a kimenetet, majd továbbadja.
-    /// </summary>
-    Edit,
-
-    /// <summary>
-    /// Visszaküldés az AI-nak ugyanezen a lépésen belül.
-    /// Új iteráció indul: eredeti kontextus + elutasított kimenet + pontosítás.
-    /// </summary>
-    Reject
+    IReadOnlyList<ValidationViolation> Validate(
+        string outputContent,
+        ValidatorRuleSet? ruleSet);
 }

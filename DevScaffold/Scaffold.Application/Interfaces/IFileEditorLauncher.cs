@@ -16,20 +16,20 @@
 
  */
 
-using Scaffold.Agent.Protocol;
-
-namespace Scaffold.ServiceHost;
+namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Inference backend absztrakciója.
-/// StreamWriter helyett TextWriter – a hívó CountingTextWriter-t adhat át
-/// anélkül hogy a backend implementációk változnának, mivel StreamWriter : TextWriter.
+/// Fájl megnyitása szövegszerkesztőben.
+/// Az implementáció platform-specifikus – a hívó nem tudja
+/// hogy notepad, vim, code, vagy bármi más nyílik meg.
 /// </summary>
-internal interface IInferenceBackend : IAsyncDisposable
+public interface IFileEditorLauncher
 {
     /// <summary>
-    /// Lefuttatja az inference-t és a generált tokeneket a writer-be írja.
+    /// Megnyitja a fájlt az operációs rendszer alapértelmezett szövegszerkesztőjében.
+    /// Ha az editor nem indítható el, nem dob kivételt – a hívó feladata
+    /// a fallback megjelenítése.
     /// </summary>
-    /// <returns>A generált tokenek száma.</returns>
-    Task<uint> RunAsync(InferRequest request, TextWriter writer, CancellationToken cancellationToken);
+    /// <returns>true ha az editor sikeresen elindult, false ha nem.</returns>
+    bool TryOpen(string filePath);
 }

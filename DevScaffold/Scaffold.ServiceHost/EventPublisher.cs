@@ -17,6 +17,7 @@
  */
 
 using System.IO.Pipes;
+using Scaffold.ServiceHost.Abstractions;
 using Google.Protobuf;
 using Scaffold.Agent.Protocol;
 
@@ -33,7 +34,7 @@ namespace Scaffold.ServiceHost;
 /// Multi-session: a ResetForNewConnectionAsync új pipe instance-t hoz létre
 /// miután a CLI kilépett, így a következő CLI session csatlakozhat.
 /// </summary>
-public class EventPublisher : IAsyncDisposable
+public class EventPublisher : IEventPublisher, IPipeConnectionLifecycle, IAsyncDisposable
 {
     private readonly string _pipeName;
     private NamedPipeServerStream _pipe;

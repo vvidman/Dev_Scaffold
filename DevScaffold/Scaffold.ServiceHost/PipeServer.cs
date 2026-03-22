@@ -19,6 +19,7 @@
 using Google.Protobuf;
 using Scaffold.Agent.Protocol;
 using System.IO.Pipes;
+using Scaffold.ServiceHost.Abstractions;
 
 namespace Scaffold.ServiceHost;
 
@@ -27,15 +28,15 @@ namespace Scaffold.ServiceHost;
 ///
 /// Két egyirányú pipe:
 /// - command pipe: CLI → ServiceHost (olvasás)
-/// - event pipe:   ServiceHost → CLI (írás, az EventPublisher kezeli)
+/// - event pipe:   ServiceHost → CLI (írás, az IServiceEventPublisher kezeli)
 ///
 /// Multi-session: minden CLI hívás egy session. A ServiceHost
 /// a session lezárása után új CLI kapcsolatot vár, amíg
 /// ShutdownToken nem triggerelődik.
 ///
 /// Session indulási sorrend:
-/// 1. Event pipe nyitása – CLI csatlakozás megvárása
-/// 2. ServiceReadyEvent küldése
+/// 1. Event pipe nyitása – CLI csatlakozás megvárása (IPipeConnectionLifecycle)
+/// 2. ServiceReadyEvent küldése (IServiceEventPublisher)
 /// 3. Command pipe nyitása – CLI csatlakozás megvárása
 /// 4. Command loop – CLI kilép → pipe lezárul → session vége
 ///
@@ -46,8 +47,9 @@ namespace Scaffold.ServiceHost;
 public class PipeServer : IAsyncDisposable
 {
     private readonly string _pipeName;
-    private readonly CommandDispatcher _dispatcher;
-    private readonly EventPublisher _eventPublisher;
+    private readonly CommandDispatcher _dispatcher;  // TODO: ICommandDispatcher interfész (következő refaktor)
+    private readonly IServiceEventPublisher _eventPublisher;
+    private readonly IPipeConnectionLifecycle _pipeLifecycle;
     private readonly string _version;
 
     private NamedPipeServerStream? _commandPipe;
@@ -56,12 +58,14 @@ public class PipeServer : IAsyncDisposable
     public PipeServer(
         string pipeName,
         CommandDispatcher dispatcher,
-        EventPublisher eventPublisher,
+        IServiceEventPublisher eventPublisher,
+        IPipeConnectionLifecycle pipeLifecycle,
         string version = "1.0.0")
     {
         _pipeName = pipeName;
         _dispatcher = dispatcher;
         _eventPublisher = eventPublisher;
+        _pipeLifecycle = pipeLifecycle;
         _version = version;
     }
 
@@ -96,7 +100,7 @@ public class PipeServer : IAsyncDisposable
 
             try
             {
-                await _eventPublisher.ResetForNewConnectionAsync(cancellationToken);
+                await _pipeLifecycle.ResetForNewConnectionAsync(cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -113,7 +117,7 @@ public class PipeServer : IAsyncDisposable
     {
         // 1. Event pipe – CLI csatlakozás megvárása
         Console.WriteLine("[ServiceHost] Event pipe megnyitása...");
-        await _eventPublisher.WaitForConnectionAsync(token);
+        await _pipeLifecycle.WaitForConnectionAsync(token);
         Console.WriteLine("[ServiceHost] Event pipe: CLI csatlakozott.");
 
         // 2. ServiceReadyEvent – ez a CLI ready jele

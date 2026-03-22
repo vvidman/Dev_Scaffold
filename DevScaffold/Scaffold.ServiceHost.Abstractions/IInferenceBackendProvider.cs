@@ -1,4 +1,4 @@
-/*
+﻿/*
 
    Copyright 2026 Viktor Vidman
 
@@ -16,31 +16,21 @@
 
  */
 
-namespace Scaffold.Domain.Models;
+namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Human validáció lehetséges kimenetei minden step után.
+/// Inference backend lekérése alias alapján.
+/// Az InferenceWorker csak ezt az interfészt látja –
+/// nem tudja hogy a backend cache-elt, lazy betöltött, vagy API alapú.
 /// </summary>
-public enum ValidationOutcome
+public interface IInferenceBackendProvider
 {
     /// <summary>
-    /// A kimenet még nem volt értkelve
+    /// Visszaadja a betöltött backendet az alias alapján.
+    /// Ha még nincs betöltve, most inicializálja (lazy).
     /// </summary>
-    NotValidated,
-
-    /// <summary>
-    /// A kimenet megfelelő, mehet a következő lépésre.
-    /// </summary>
-    Accept,
-
-    /// <summary>
-    /// Human szerkesztette a kimenetet, majd továbbadja.
-    /// </summary>
-    Edit,
-
-    /// <summary>
-    /// Visszaküldés az AI-nak ugyanezen a lépésen belül.
-    /// Új iteráció indul: eredeti kontextus + elutasított kimenet + pontosítás.
-    /// </summary>
-    Reject
+    Task<IInferenceBackend> GetOrLoadAsync(
+        string requestId,
+        string alias,
+        CancellationToken cancellationToken = default);
 }

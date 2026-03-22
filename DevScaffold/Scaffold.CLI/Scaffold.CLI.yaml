@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────
+# Scaffold.CLI.yaml – Projekt-szintű konfiguráció
+#
+# Helye: az exe mellett (Scaffold.CLI.exe / Scaffold.CLI)
+# Minden projekt saját példányt kap ebből a fájlból.
+# ─────────────────────────────────────────────
+
+# A ServiceHost bináris útvonala.
+# Relatív path az exe helyéhez képest, vagy abszolút.
+host_binary_path: D:\Work\DevScaffoldImplementation\DevScaffold\Scaffold.ServiceHost\bin\Debug\net10.0\Scaffold.ServiceHost.exe
+
+# A models.yaml fájl útvonala.
+# Tartalmazza az összes model alias definíciót (név, endpoint, paraméterek).
+models: D:\Work\ModelRepository\models.yaml
+
+# A Named Pipe azonosítója – egyben a projekt neve is.
+# Szóköz megengedett, az output mappában automatikusan _ lesz belőle.
+# Pl. "My Awesome Project" → output/My_Awesome_Project/
+pipe_name: Expense Tracker Project
+
+# Az output gyökér mappája.
+# Struktúra: {output}/{pipe_name}/{step_name}_{generation}/
+# Pl. ./output/MyProject/task_breakdown_1/
+output: d:\Work\ScaffoldOutputs
+
+# A projekt bemeneti YAML fájl útvonala.
+# Ez a projekt fő kontextusa (pl. ./input.yaml).
+project_context: D:\Work\ScaffoldOutputs\Expense_Tracker_Project\base_inputs\input.yaml
+
+# ─────────────────────────────────────────────
+# Step definíciók
+#
+# Minden kulcs a step neve – ezt kell átadni a --step argumentumnak.
+# Pl. "DevScaffold --step task_breakdown"
+# ─────────────────────────────────────────────
+steps:
+
+  task_breakdown:
+    # A step agent konfigurációs fájl útvonala.
+    # Tartalmazza a system promptot, output formátumot, max_tokens-t stb.
+    input_config: D:\Work\ScaffoldOutputs\Expense_Tracker_Project\base_inputs\task_breakdown_agent.yaml
+
+    # A validator konfigurációs fájl útvonala. (opcionális)
+    # Ha a stephez nincs validator, ezt a sort el lehet hagyni.
+    validator_config: D:\Work\ScaffoldOutputs\Expense_Tracker_Project\base_inputs\task_breakdown_validator.yaml
+
+    # Model alias – pontosan meg kell egyeznie a models.yaml-ben definiált névvel.
+    model_alias: local-reasoning
+
+  # coding:
+  #   input_config:
+  #   validator_config:
+  #   model_alias:
+  #   # Későbbi stepeknél az input általában az előző step outputja.
+  #   # Pl. a task_breakdown step által generált fájl.
+  #   input:
+
+  # unit_testing:
+  #   input_config:
+  #   validator_config:
+  #   model_alias:
+  #   input:

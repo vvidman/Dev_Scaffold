@@ -1,4 +1,4 @@
-/*
+﻿/*
 
    Copyright 2026 Viktor Vidman
 
@@ -16,31 +16,20 @@
 
  */
 
-namespace Scaffold.Domain.Models;
+using Scaffold.Agent.Protocol;
+
+namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Human validáció lehetséges kimenetei minden step után.
+/// Inference backend absztrakciója.
+/// StreamWriter helyett TextWriter – a hívó CountingTextWriter-t adhat át
+/// anélkül hogy a backend implementációk változnának, mivel StreamWriter : TextWriter.
 /// </summary>
-public enum ValidationOutcome
+public interface IInferenceBackend : IAsyncDisposable
 {
     /// <summary>
-    /// A kimenet még nem volt értkelve
+    /// Lefuttatja az inference-t és a generált tokeneket a writer-be írja.
     /// </summary>
-    NotValidated,
-
-    /// <summary>
-    /// A kimenet megfelelő, mehet a következő lépésre.
-    /// </summary>
-    Accept,
-
-    /// <summary>
-    /// Human szerkesztette a kimenetet, majd továbbadja.
-    /// </summary>
-    Edit,
-
-    /// <summary>
-    /// Visszaküldés az AI-nak ugyanezen a lépésen belül.
-    /// Új iteráció indul: eredeti kontextus + elutasított kimenet + pontosítás.
-    /// </summary>
-    Reject
+    /// <returns>A generált tokenek száma.</returns>
+    Task<uint> RunAsync(InferRequest request, TextWriter writer, CancellationToken cancellationToken);
 }

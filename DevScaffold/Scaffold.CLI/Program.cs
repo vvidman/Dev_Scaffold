@@ -18,25 +18,38 @@
 
 using Microsoft.Extensions.DependencyInjection;
 using Scaffold.Agent.Protocol;
+using Scaffold.Application;
 using Scaffold.Application.Interfaces;
 using Scaffold.CLI;
 using Scaffold.Domain.Models;
-using Scaffold.Infrastructure.StepConfig;
+using Scaffold.Infrastructure.ConfigHandler;
+using Scaffold.Validation;
+using Scaffold.Validation.Abstractions;
+using Scaffold.Validation.Steps;
+using Scaffold.Validation.Validators;
 
 // ─────────────────────────────────────────────
 // DevScaffold CLI
 //
 // Használat:
-//   DevScaffold run  --config <step_agent_config.yaml>
-//                    --input  <input.yaml>
-//                    --model  <model_alias>
-//                    --host   <servicehost_binary_path>
-//                    --models <models.yaml>
-//                   [--output   <output mappa>]     (alapértelmezett: ./output)
-//                   [--pipe-name <név>]             (alapértelmezett: scaffold)
+//   DevScaffold --step <step_name>
 //
 //   DevScaffold shutdown
-//                   [--pipe-name <név>]             (alapértelmezett: scaffold)
+//
+// Konfiguráció: Scaffold.CLI.yaml (az exe mellett, mindig szükséges)
+//   host_binary_path: ./bin/Scaffold.ServiceHost
+//   models:           ./models.yaml
+//   pipe_name:        MyProject
+//   output:           ./output
+//   project_context:  ./input.yaml
+//   steps:
+//     task_breakdown:
+//       input_config:    ./task_breakdown_agent.yaml
+//       validator_config: ./task_breakdown_validator.yaml
+//       model_alias:     qwen2.5-7b-instruct
+//     coding:
+//       input_config:    ./coding_agent.yaml
+//       model_alias:     qwen2.5-coder-7b-instruct
 //
 // Visszatérési kódok:
 //   0 – Accept vagy Edit (sikeres lépés)
@@ -44,15 +57,38 @@ using Scaffold.Infrastructure.StepConfig;
 //   2 – Reject (a human visszaküldte, újragenerálás szükséges)
 // ─────────────────────────────────────────────
 
-var (mode, parsedArgs) = ParseArgs(Environment.GetCommandLineArgs()[1..]);
+var (mode, stepName) = ParseArgs(Environment.GetCommandLineArgs()[1..]);
 
-if (mode is "help" or "" || parsedArgs.ContainsKey("--help"))
+if (mode is "help")
 {
     PrintHelp();
     return 0;
 }
 
+// ─────────────────────────────────────────────
+// CLI konfiguráció betöltés
+// ─────────────────────────────────────────────
+
+var configPath = GetCliConfigPath();
+CliProjectConfig cliConfig;
+
+try
+{
+    var configReader = new YamlCliProjectConfigReader();
+    cliConfig = configReader.Load(configPath);
+}
+catch (Exception ex)
+{
+    Console.ForegroundColor = ConsoleColor.Red;
+    Console.Error.WriteLine($"[SCAFFOLD ERROR] {ex.Message}");
+    Console.ResetColor();
+    return 1;
+}
+
+// ─────────────────────────────────────────────
 // Graceful shutdown – Ctrl+C esetén
+// ─────────────────────────────────────────────
+
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {
@@ -64,29 +100,41 @@ Console.CancelKeyPress += (_, e) =>
 
 return mode switch
 {
-    "run" => await RunAsync(parsedArgs, cts.Token),
-    "shutdown" => await ShutdownAsync(parsedArgs, cts.Token),
+    "run" => await RunAsync(cliConfig, stepName!, cts.Token),
+    "shutdown" => await ShutdownAsync(cliConfig, cts.Token),
     _ => UnknownMode(mode)
 };
 
 // ─────────────────────────────────────────────
-// run parancs
+// run (--step <name>)
 // ─────────────────────────────────────────────
 
 async Task<int> RunAsync(
-    Dictionary<string, string> args,
+    CliProjectConfig config,
+    string step,
     CancellationToken cancellationToken)
 {
-    if (!ValidateRunArgs(args))
+    // Step-szintű validáció (fájlok megléte, kötelező mezők)
+    try
+    {
+        new YamlCliProjectConfigReader().Validate(config, step);
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Error.WriteLine($"[SCAFFOLD ERROR] {ex.Message}");
+        Console.ResetColor();
         return 1;
+    }
 
-    var stepConfigPath = args["--config"];
-    var inputYamlPath = args["--input"];
-    var modelAlias = args["--model"];
-    var serviceHostPath = args["--host"];
-    var modelsYamlPath = args["--models"];
-    var outputBasePath = args.GetValueOrDefault("--output", "./output");
-    var pipeName = args.GetValueOrDefault("--pipe-name", "scaffold");
+    var stepConfig = config.Steps[step];
+    var stepConfigPath = stepConfig.InputConfig;
+    var inputYamlPath = config.ProjectContext;
+    var modelAlias = stepConfig.ModelAlias;
+
+    // Output: {output_root}/{pipe_name}/{step}_{generation}/
+    var projectFolder = SanitizeFolderName(config.PipeName);
+    var outputBasePath = Path.Combine(config.Output, projectFolder);
 
     // ─────────────────────────────────────────────
     // DI konténer
@@ -96,7 +144,16 @@ async Task<int> RunAsync(
     services.AddSingleton<IScaffoldConsole, ConsoleScaffoldConsole>();
     services.AddSingleton<IStepAgentConfigReader, YamlStepAgentConfigReader>();
     services.AddSingleton<IInputAssembler, InputAssembler>();
+    services.AddSingleton<IFileEditorLauncher, DefaultFileEditorLauncher>();
     services.AddSingleton<IHumanValidationService, ConsoleHumanValidationService>();
+    // Validation réteg
+    // UniversalOutputValidator szándékosan NEM kerül DI-ba –
+    // belső komponens, a CompositeOutputValidator példányosítja.
+    services.AddSingleton<IStepOutputValidator, TaskBreakdownValidator>();
+    services.AddSingleton(sp => new StepValidatorRegistry(sp.GetServices<IStepOutputValidator>()));
+    services.AddSingleton<IOutputValidator, CompositeOutputValidator>();
+    services.AddSingleton<IValidatorRuleSetReader, ValidatorYamlReader>();
+    services.AddScaffoldApplication();
     var provider = services.BuildServiceProvider();
 
     var scaffoldConsole = provider.GetRequiredService<IScaffoldConsole>();
@@ -108,8 +165,8 @@ async Task<int> RunAsync(
     string stepId;
     try
     {
-        var configReader = provider.GetRequiredService<IStepAgentConfigReader>();
-        stepId = configReader.Load(stepConfigPath).Step;
+        var reader = provider.GetRequiredService<IStepAgentConfigReader>();
+        stepId = reader.Load(stepConfigPath).Step;
     }
     catch (Exception ex)
     {
@@ -152,10 +209,10 @@ async Task<int> RunAsync(
     // ─────────────────────────────────────────────
 
     var launcher = new ServiceHostLauncher(
-        serviceHostPath: serviceHostPath,
-        modelsYamlPath: modelsYamlPath,
+        serviceHostPath: config.HostBinaryPath,
+        modelsYamlPath: config.Models,
         outputBasePath: outputBasePath,
-        pipeName: pipeName);
+        pipeName: config.PipeName);
 
     PipeClient pipeClient;
 
@@ -182,13 +239,16 @@ async Task<int> RunAsync(
 
     await using (pipeClient)
     {
-        await using var session = new ScaffoldSession(
+        await using var session = new ScaffoldStepOrchestrator(
             pipeClient,
             provider.GetRequiredService<IStepAgentConfigReader>(),
             provider.GetRequiredService<IInputAssembler>(),
             provider.GetRequiredService<IHumanValidationService>(),
             auditLogger,
             scaffoldConsole,
+            provider.GetRequiredService<IInferenceResultHandler>(),
+            provider.GetRequiredService<IRefinementStrategy>(),
+            provider.GetRequiredService<IValidatorRuleSetReader>(),
             stepConfigPath: stepConfigPath,
             inputYamlPath: inputYamlPath,
             modelAlias: modelAlias,
@@ -235,7 +295,7 @@ static int HandleReject(ValidationDecision decision, IScaffoldConsole console)
     console.WriteCli("[SCAFFOLD] Lépés visszaküldve.");
 
     if (!string.IsNullOrWhiteSpace(decision.RejectionClarification))
-        console.WriteCli($"[SCAFFOLD] Pontosítás rögzítve az audit logban.");
+        console.WriteCli("[SCAFFOLD] Pontosítás rögzítve az audit logban.");
 
     // Exit 2 jelzi a hívónak (pl. shell script) hogy reject történt,
     // nem hiba – újrafuttatás szükséges.
@@ -247,10 +307,10 @@ static int HandleReject(ValidationDecision decision, IScaffoldConsole console)
 // ─────────────────────────────────────────────
 
 async Task<int> ShutdownAsync(
-    Dictionary<string, string> args,
+    CliProjectConfig config,
     CancellationToken cancellationToken)
 {
-    var pipeName = args.GetValueOrDefault("--pipe-name", "scaffold");
+    var pipeName = config.PipeName;
     var console = new ConsoleScaffoldConsole();
 
     if (!File.Exists($@"\\.\pipe\{pipeName}-events"))
@@ -326,14 +386,11 @@ static int ComputeNextGeneration(string outputBasePath, string stepId)
     if (!Directory.Exists(outputBasePath))
         return 1;
 
-    // Megnézi hány {stepId}_* nevű folder létezik már
     var existing = Directory.GetDirectories(
         outputBasePath,
         $"{stepId}_*",
         SearchOption.TopDirectoryOnly);
 
-    // A sorszámokat kinyeri és a maximumot veszi – lyukas sorozat esetén is helyes
-    // Pl. ha csak _1 és _3 van (a _2 törölve lett), akkor a következő _4
     var maxGeneration = existing
         .Select(dir => Path.GetFileName(dir))
         .Select(name => TryParseGeneration(name, stepId))
@@ -359,50 +416,52 @@ static int? TryParseGeneration(string folderName, string stepId)
 // Segédfüggvények
 // ─────────────────────────────────────────────
 
-static (string mode, Dictionary<string, string> args) ParseArgs(string[] rawArgs)
+/// <summary>
+/// Az exe neve alapján meghatározza a CLI yaml config útvonalát.
+/// Pl. /app/Scaffold.CLI.exe → /app/Scaffold.CLI.yaml
+/// </summary>
+static string GetCliConfigPath()
 {
-    if (rawArgs.Length == 0)
-        return ("help", new Dictionary<string, string>());
+    var exePath = Environment.ProcessPath
+        ?? Path.Combine(AppContext.BaseDirectory, "Scaffold.CLI");
 
-    var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-    var mode = rawArgs[0];
-
-    for (int i = 1; i < rawArgs.Length; i++)
-    {
-        if (!rawArgs[i].StartsWith("--"))
-            continue;
-
-        var key = rawArgs[i];
-        var value = (i + 1 < rawArgs.Length && !rawArgs[i + 1].StartsWith("--"))
-            ? rawArgs[++i]
-            : "true";
-
-        result[key] = value;
-    }
-
-    return (mode, result);
+    return Path.ChangeExtension(exePath, ".yaml");
 }
 
-static bool ValidateRunArgs(Dictionary<string, string> args)
+/// <summary>
+/// Eltávolítja a szóközöket a mappa névből (output path sanitizálás).
+/// </summary>
+static string SanitizeFolderName(string name) =>
+    name.Replace(" ", "_");
+
+static (string mode, string? stepName) ParseArgs(string[] rawArgs)
 {
-    var required = new[] { "--config", "--input", "--model", "--host", "--models" };
-    var missing = required.Where(r => !args.ContainsKey(r)).ToList();
+    if (rawArgs.Length == 0)
+        return ("help", null);
 
-    if (missing.Count == 0) return true;
+    // shutdown parancs
+    if (rawArgs[0].Equals("shutdown", StringComparison.OrdinalIgnoreCase))
+        return ("shutdown", null);
 
-    Console.ForegroundColor = ConsoleColor.Red;
-    Console.Error.WriteLine(
-        $"[SCAFFOLD ERROR] Hiányzó argumentumok: {string.Join(", ", missing)}");
-    Console.ResetColor();
-    Console.WriteLine();
-    PrintHelp();
-    return false;
+    // --step <name> → run
+    for (int i = 0; i < rawArgs.Length - 1; i++)
+    {
+        if (rawArgs[i].Equals("--step", StringComparison.OrdinalIgnoreCase))
+            return ("run", rawArgs[i + 1]);
+    }
+
+    // --help vagy ismeretlen
+    if (rawArgs.Any(a => a.Equals("--help", StringComparison.OrdinalIgnoreCase)
+                      || a.Equals("-h", StringComparison.OrdinalIgnoreCase)))
+        return ("help", null);
+
+    return ("unknown", rawArgs[0]);
 }
 
 static int UnknownMode(string mode)
 {
     Console.ForegroundColor = ConsoleColor.Red;
-    Console.Error.WriteLine($"[SCAFFOLD ERROR] Ismeretlen parancs: {mode}");
+    Console.Error.WriteLine($"[SCAFFOLD ERROR] Ismeretlen parancs: '{mode}'");
     Console.ResetColor();
     Console.WriteLine();
     PrintHelp();
@@ -416,16 +475,24 @@ static void PrintHelp()
         DevScaffold – Scaffold Protocol CLI
 
         Használat:
-          DevScaffold run  --config <step_agent_config.yaml>
-                           --input  <input.yaml>
-                           --model  <model_alias>
-                           --host   <servicehost_binary_path>
-                           --models <models.yaml>
-                          [--output   <output mappa>]
-                          [--pipe-name <név>]
+          Scaffold.CLI --step <step_name>
+          Scaffold.CLI shutdown
 
-          DevScaffold shutdown
-                          [--pipe-name <név>]
+        Konfiguráció: Scaffold.CLI.yaml (az exe mellett)
+
+          host_binary_path: ./bin/Scaffold.ServiceHost
+          models:           ./models.yaml
+          pipe_name:        MyProject
+          output:           ./output
+          project_context:  ./input.yaml
+          steps:
+            task_breakdown:
+              input_config:     ./task_breakdown_agent.yaml
+              validator_config: ./task_breakdown_validator.yaml
+              model_alias:      qwen2.5-7b-instruct
+            coding:
+              input_config:     ./coding_agent.yaml
+              model_alias:      qwen2.5-coder-7b-instruct
 
         Visszatérési kódok:
           0 – Accept vagy Edit

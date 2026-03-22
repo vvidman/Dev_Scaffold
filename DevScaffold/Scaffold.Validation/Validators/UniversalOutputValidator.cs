@@ -16,6 +16,8 @@
 
  */
 
+using Scaffold.Validation.Abstractions;
+
 namespace Scaffold.Validation.Validators;
 
 /// <summary>

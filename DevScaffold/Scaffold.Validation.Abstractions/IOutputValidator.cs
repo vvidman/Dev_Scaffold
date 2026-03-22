@@ -16,7 +16,7 @@
 
  */
 
-namespace Scaffold.Validation.Abstract;
+namespace Scaffold.Validation.Abstractions;
 
 /// <summary>
 /// Egy step kimenetének validálása.

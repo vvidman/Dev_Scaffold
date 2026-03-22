@@ -18,14 +18,14 @@
 
 using Scaffold.Agent.Protocol;
 
-namespace Scaffold.ServiceHost;
+namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
 /// Inference backend absztrakciója.
 /// StreamWriter helyett TextWriter – a hívó CountingTextWriter-t adhat át
 /// anélkül hogy a backend implementációk változnának, mivel StreamWriter : TextWriter.
 /// </summary>
-internal interface IInferenceBackend : IAsyncDisposable
+public interface IInferenceBackend : IAsyncDisposable
 {
     /// <summary>
     /// Lefuttatja az inference-t és a generált tokeneket a writer-be írja.

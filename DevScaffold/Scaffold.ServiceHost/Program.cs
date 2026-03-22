@@ -19,6 +19,7 @@
 using Scaffold.Domain.Models;
 using Scaffold.Infrastructure.ConfigHandler;
 using Scaffold.ServiceHost;
+using Scaffold.ServiceHost.Abstractions;
 
 // ─────────────────────────────────────────────
 // Scaffold ServiceHost
@@ -80,8 +81,11 @@ catch (Exception ex)
 // EventPublisher – event pipe írás
 await using var eventPublisher = new EventPublisher(pipeName);
 
-// ModelCache – lazy backend betöltés (LLamaSharp vagy API)
-await using var modelCache = new ModelCache(registry);
+// InferenceBackendFactory – backend példányosítás (LLamaSharp vagy API döntés)
+using var backendFactory = new DefaultInferenceBackendFactory();
+
+// ModelCache – lazy backend betöltés
+await using var modelCache = new ModelCache(registry, backendFactory);
 
 // ModelCache eseményeket bekötjük az EventPublisher-be
 modelCache.ModelStatusChanged += async (alias, status, message) =>
@@ -110,6 +114,7 @@ var dispatcher = new CommandDispatcher(
 await using var pipeServer = new PipeServer(
     pipeName,
     dispatcher,
+    eventPublisher,
     eventPublisher,
     version);
 

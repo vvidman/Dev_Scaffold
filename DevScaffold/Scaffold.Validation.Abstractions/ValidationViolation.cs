@@ -16,7 +16,7 @@
 
  */
 
-namespace Scaffold.Validation;
+namespace Scaffold.Validation.Abstractions;
 
 public enum ViolationSeverity
 {

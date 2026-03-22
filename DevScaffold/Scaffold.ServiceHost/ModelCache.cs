@@ -18,7 +18,7 @@
 
 using Scaffold.Agent.Protocol;
 using Scaffold.Domain.Models;
-using Scaffold.ServiceHost.InferenceImpl;
+using Scaffold.ServiceHost.Abstractions;
 
 namespace Scaffold.ServiceHost;
 
@@ -37,12 +37,10 @@ namespace Scaffold.ServiceHost;
 /// ugyanazt a backendet egyszerre csak egyszer inicializálja,
 /// még párhuzamos kérések esetén sem.
 /// </summary>
-public class ModelCache : IAsyncDisposable
+public class ModelCache : IModelCache, IAsyncDisposable
 {
     private readonly ModelRegistryConfig _registry;
-
-    // Megosztott HttpClient az összes ApiInferenceBackend számára
-    private readonly HttpClient _httpClient = new();
+    private readonly IInferenceBackendFactory _backendFactory;
 
     // Betöltött backendek cache-e – alias → IInferenceBackend
     private readonly Dictionary<string, IInferenceBackend> _loadedBackends = new();
@@ -59,16 +57,17 @@ public class ModelCache : IAsyncDisposable
     // így a ModelCache nem függ közvetlenül az EventPublisher-től
     public event Func<string, ModelStatus, string, Task>? ModelStatusChanged;
 
-    public ModelCache(ModelRegistryConfig registry)
+    public ModelCache(ModelRegistryConfig registry, IInferenceBackendFactory backendFactory)
     {
         _registry = registry;
+        _backendFactory = backendFactory;
     }
 
     /// <summary>
     /// Visszaadja a betöltött backendet az alias alapján.
     /// Ha még nincs betöltve/inicializálva, most csinálja (lazy).
     /// </summary>
-    internal async Task<IInferenceBackend> GetOrLoadAsync(
+    public async Task<IInferenceBackend> GetOrLoadAsync(
         string requestId,
         string alias,
         CancellationToken cancellationToken = default)
@@ -189,9 +188,7 @@ public class ModelCache : IAsyncDisposable
 
         try
         {
-            IInferenceBackend backend = IsApiEndpoint(config.Path)
-                ? new ApiInferenceBackend(config, _httpClient)
-                : await LlamaInferenceBackend.LoadStatelessAsync(config, cancellationToken);
+            var backend = await _backendFactory.CreateAsync(config, cancellationToken);
 
             await _dictionaryLock.WaitAsync(cancellationToken);
             try
@@ -205,9 +202,7 @@ public class ModelCache : IAsyncDisposable
 
             if (ModelStatusChanged is not null)
                 await ModelStatusChanged(alias, ModelStatus.Loaded,
-                    IsApiEndpoint(config.Path)
-                        ? $"API backend kész: {config.Path}"
-                        : $"Modell betöltve: {alias}");
+                    $"Backend kész: {alias}");
 
             return backend;
         }
@@ -220,9 +215,6 @@ public class ModelCache : IAsyncDisposable
         }
     }
 
-    private static bool IsApiEndpoint(string path) =>
-        path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-        || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
 
     public async ValueTask DisposeAsync()
     {
@@ -247,6 +239,5 @@ public class ModelCache : IAsyncDisposable
         foreach (var l in _loadLocks.Values)
             l.Dispose();
 
-        _httpClient.Dispose();
     }
 }

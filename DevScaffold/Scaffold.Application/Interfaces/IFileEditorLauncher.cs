@@ -16,23 +16,20 @@
 
  */
 
-namespace Scaffold.Validation.Abstract;
+namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Per-step validációs logika.
-/// Minden step típushoz egy dedikált implementáció készül.
-/// Ha egy step_id-hoz nincs regisztrált validator, csak az UniversalOutputValidator fut.
+/// Fájl megnyitása szövegszerkesztőben.
+/// Az implementáció platform-specifikus – a hívó nem tudja
+/// hogy notepad, vim, code, vagy bármi más nyílik meg.
 /// </summary>
-public interface IStepOutputValidator
+public interface IFileEditorLauncher
 {
-    /// <summary>Egyeznie kell a step agent config step mezőjével.</summary>
-    string StepId { get; }
-
     /// <summary>
-    /// Step-specifikus ellenőrzések futtatása.
-    /// Csak a saját step-re vonatkozó violation-öket adja vissza.
+    /// Megnyitja a fájlt az operációs rendszer alapértelmezett szövegszerkesztőjében.
+    /// Ha az editor nem indítható el, nem dob kivételt – a hívó feladata
+    /// a fallback megjelenítése.
     /// </summary>
-    IReadOnlyList<ValidationViolation> Validate(
-        string outputContent,
-        ValidatorRuleSet? ruleSet);
+    /// <returns>true ha az editor sikeresen elindult, false ha nem.</returns>
+    bool TryOpen(string filePath);
 }

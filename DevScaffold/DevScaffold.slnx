@@ -9,7 +9,9 @@
   <Project Path="Scaffold.CLI/Scaffold.CLI.csproj" />
   <Project Path="Scaffold.Domain/Scaffold.Domain.csproj" />
   <Project Path="Scaffold.Infrastructure.ConfigHandler/Scaffold.Infrastructure.ConfigHandler.csproj" />
+  <Project Path="Scaffold.ServiceHost.Abstractions/Scaffold.ServiceHost.Abstractions.csproj" Id="5b4816cb-55d2-4256-945c-8eb08c6c6e79" />
   <Project Path="Scaffold.ServiceHost/Scaffold.ServiceHost.csproj" Id="08bd7679-0d88-4acb-9062-a03fc2fae6db" />
+  <Project Path="Scaffold.Validation.Abstractions/Scaffold.Validation.Abstractions.csproj" Id="d98a2c35-81ec-4d5a-b986-6c73250c616f" />
   <Project Path="Scaffold.Validation.Steps/Scaffold.Validation.Steps.csproj" Id="2eb120cc-942d-45df-808c-28b423002b42" />
   <Project Path="Scaffold.Validation/Scaffold.Validation.csproj" Id="8d92ba7c-91b9-4b35-9be0-4f9a18910233" />
 </Solution>

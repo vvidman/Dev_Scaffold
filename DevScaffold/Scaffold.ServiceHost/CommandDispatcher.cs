@@ -17,6 +17,7 @@
  */
 
 using Scaffold.Agent.Protocol;
+using Scaffold.ServiceHost.Abstractions;
 
 namespace Scaffold.ServiceHost;
 
@@ -25,12 +26,12 @@ namespace Scaffold.ServiceHost;
 ///
 /// A command pipe-ról érkező minden parancsot fogad,
 /// és a megfelelő komponenshez irányítja:
-/// - InferRequest        → InferenceWorker
-/// - CancelInferRequest  → InferenceWorker.Cancel()
+/// - InferRequest        → IInferenceWorker
+/// - CancelInferRequest  → IInferenceWorker.Cancel()
 /// - ShutdownRequest     → leállítási folyamat
-/// - LoadModelRequest    → ModelCache
-/// - UnloadModelRequest  → ModelCache
-/// - ListModelsRequest   → ModelCache + EventPublisher
+/// - LoadModelRequest    → IModelCacheManager
+/// - UnloadModelRequest  → IModelCacheManager
+/// - ListModelsRequest   → IModelCacheManager + IEventPublisher
 ///
 /// Shutdown szemantika (ADR Protocol #6):
 /// - force = false: megvárja az aktív inference befejezését, majd leáll
@@ -38,9 +39,9 @@ namespace Scaffold.ServiceHost;
 /// </summary>
 public class CommandDispatcher
 {
-    private readonly InferenceWorker _inferenceWorker;
-    private readonly ModelCache _modelCache;
-    private readonly EventPublisher _eventPublisher;
+    private readonly IInferenceWorker _inferenceWorker;
+    private readonly IModelCacheManager _modelCache;
+    private readonly IEventPublisher _eventPublisher;
 
     // Shutdown jelzése a PipeServer felé –
     // a CommandDispatcher nem állítja le a processt,
@@ -50,9 +51,9 @@ public class CommandDispatcher
     public CancellationToken ShutdownToken => _shutdownCts.Token;
 
     public CommandDispatcher(
-        InferenceWorker inferenceWorker,
-        ModelCache modelCache,
-        EventPublisher eventPublisher)
+        IInferenceWorker inferenceWorker,
+        IModelCacheManager modelCache,
+        IEventPublisher eventPublisher)
     {
         _inferenceWorker = inferenceWorker;
         _modelCache = modelCache;

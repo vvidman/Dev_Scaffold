@@ -18,12 +18,13 @@
 
 using Microsoft.Extensions.DependencyInjection;
 using Scaffold.Agent.Protocol;
+using Scaffold.Application;
 using Scaffold.Application.Interfaces;
 using Scaffold.CLI;
 using Scaffold.Domain.Models;
 using Scaffold.Infrastructure.ConfigHandler;
 using Scaffold.Validation;
-using Scaffold.Validation.Abstract;
+using Scaffold.Validation.Abstractions;
 using Scaffold.Validation.Steps;
 using Scaffold.Validation.Validators;
 
@@ -143,6 +144,7 @@ async Task<int> RunAsync(
     services.AddSingleton<IScaffoldConsole, ConsoleScaffoldConsole>();
     services.AddSingleton<IStepAgentConfigReader, YamlStepAgentConfigReader>();
     services.AddSingleton<IInputAssembler, InputAssembler>();
+    services.AddSingleton<IFileEditorLauncher, DefaultFileEditorLauncher>();
     services.AddSingleton<IHumanValidationService, ConsoleHumanValidationService>();
     // Validation réteg
     // UniversalOutputValidator szándékosan NEM kerül DI-ba –
@@ -150,7 +152,8 @@ async Task<int> RunAsync(
     services.AddSingleton<IStepOutputValidator, TaskBreakdownValidator>();
     services.AddSingleton(sp => new StepValidatorRegistry(sp.GetServices<IStepOutputValidator>()));
     services.AddSingleton<IOutputValidator, CompositeOutputValidator>();
-    services.AddSingleton<ValidatorYamlReader>();
+    services.AddSingleton<IValidatorRuleSetReader, ValidatorYamlReader>();
+    services.AddScaffoldApplication();
     var provider = services.BuildServiceProvider();
 
     var scaffoldConsole = provider.GetRequiredService<IScaffoldConsole>();
@@ -236,20 +239,21 @@ async Task<int> RunAsync(
 
     await using (pipeClient)
     {
-        await using var session = new ScaffoldSession(
+        await using var session = new ScaffoldStepOrchestrator(
             pipeClient,
             provider.GetRequiredService<IStepAgentConfigReader>(),
             provider.GetRequiredService<IInputAssembler>(),
             provider.GetRequiredService<IHumanValidationService>(),
             auditLogger,
             scaffoldConsole,
+            provider.GetRequiredService<IInferenceResultHandler>(),
+            provider.GetRequiredService<IRefinementStrategy>(),
+            provider.GetRequiredService<IValidatorRuleSetReader>(),
             stepConfigPath: stepConfigPath,
             inputYamlPath: inputYamlPath,
             modelAlias: modelAlias,
             stepOutputFolder: stepOutputFolder,
-            generation: generation,
-            outputValidator: provider.GetRequiredService<IOutputValidator>(),
-            validatorYamlReader: provider.GetRequiredService<ValidatorYamlReader>());
+            generation: generation);
 
         try
         {

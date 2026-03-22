@@ -18,7 +18,6 @@
 
 using Scaffold.Application.Interfaces;
 using Scaffold.Domain.Models;
-using System.Diagnostics;
 
 namespace Scaffold.CLI;
 
@@ -29,25 +28,29 @@ namespace Scaffold.CLI;
 ///
 /// Konzol kimenet Yellow színnel az IScaffoldConsole-on keresztül –
 /// elkülönítve a CLI (Cyan) és Session (Gray) szintű üzenetektől.
-/// Az audit logolás a ScaffoldSession felelőssége – a döntés ott kerül rögzítésre.
+/// Az audit logolás a ScaffoldStepOrchestrator felelőssége –
+/// a döntés ott kerül rögzítésre.
+///
+/// A fájl megnyitása az IFileEditorLauncher-re van delegálva –
+/// a konkrét editor platform-specifikus részlet, nem fér ide.
 /// </summary>
-public class ConsoleHumanValidationService : IHumanValidationService
+public sealed class ConsoleHumanValidationService : IHumanValidationService
 {
     private readonly IScaffoldConsole _console;
+    private readonly IFileEditorLauncher _editorLauncher;
 
-    public ConsoleHumanValidationService(IScaffoldConsole console)
+    public ConsoleHumanValidationService(
+        IScaffoldConsole console,
+        IFileEditorLauncher editorLauncher)
     {
         _console = console;
+        _editorLauncher = editorLauncher;
     }
 
-    public Task<ValidationDecision> ValidateAsync(
+    /// <inheritdoc />
+    public async Task<ValidationDecision> ValidateAsync(
         string stepId,
         string outputFilePath)
-    {
-        return Task.FromResult(ValidateSync(stepId, outputFilePath));
-    }
-
-    private ValidationDecision ValidateSync(string stepId, string outputFilePath)
     {
         _console.WriteValidation("─────────────────────────────────────────────────");
         _console.WriteValidation($"[VALIDATE] Validáció szükséges: {stepId}");
@@ -55,7 +58,14 @@ public class ConsoleHumanValidationService : IHumanValidationService
         _console.WriteValidation(string.Empty);
 
         _console.WriteValidation("[VALIDATE] Megnyitom a kimenetet a szerkesztőben...");
-        OpenInEditor(outputFilePath);
+
+        if (!_editorLauncher.TryOpen(outputFilePath))
+        {
+            _console.WriteValidation(
+                "[VALIDATE] Figyelmeztetés: nem sikerült megnyitni a szerkesztőt.");
+            _console.WriteValidation(
+                $"[VALIDATE] Nyisd meg manuálisan: {outputFilePath}");
+        }
 
         _console.WriteValidation(string.Empty);
         _console.WriteValidation("Döntés:");
@@ -64,15 +74,13 @@ public class ConsoleHumanValidationService : IHumanValidationService
         _console.WriteValidation("  [3] Reject  – Visszaküldöm, pontosítással újragenerálás");
         _console.WriteValidation(string.Empty);
 
-        // A prompt sor (Console.Write inline) nem kap külön szint-színt –
-        // a bevitel maga nem szintezhető, az input kurzor pozíciója ezt megköveteli.
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.Write("Választás (1/2/3): ");
         Console.ResetColor();
 
         while (true)
         {
-            var key = Console.ReadLine()?.Trim();
+            var key = (await Console.In.ReadLineAsync())?.Trim();
 
             switch (key)
             {
@@ -92,10 +100,11 @@ public class ConsoleHumanValidationService : IHumanValidationService
                     Console.Write("> ");
                     Console.ResetColor();
 
-                    var clarification = Console.ReadLine() ?? string.Empty;
+                    var clarification = await Console.In.ReadLineAsync() ?? string.Empty;
                     _console.WriteValidation(string.Empty);
                     return new ValidationDecision(
                         ValidationOutcome.Reject,
+                        outputFilePath,
                         clarification);
 
                 default:
@@ -104,24 +113,6 @@ public class ConsoleHumanValidationService : IHumanValidationService
                     Console.ResetColor();
                     break;
             }
-        }
-    }
-
-    /// <summary>
-    /// Megnyitja a fájlt az operációs rendszer alapértelmezett szövegszerkesztőjében.
-    /// </summary>
-    private void OpenInEditor(string filePath)
-    {
-        try
-        {
-            Process.Start("notepad.exe", filePath);
-        }
-        catch (Exception ex)
-        {
-            _console.WriteValidation(
-                $"[VALIDATE] Figyelmeztetés: nem sikerült megnyitni a szerkesztőt: {ex.Message}");
-            _console.WriteValidation(
-                $"[VALIDATE] Nyisd meg manuálisan: {filePath}");
         }
     }
 }

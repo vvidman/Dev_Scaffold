@@ -18,6 +18,7 @@
 
 using Google.Protobuf;
 using Scaffold.Agent.Protocol;
+using Scaffold.Application.Interfaces;
 using System.IO.Pipes;
 
 namespace Scaffold.CLI;
@@ -37,7 +38,7 @@ namespace Scaffold.CLI;
 /// Ez a sorrend garantálja hogy a ServiceReadyEvent nem vész el az
 /// event loop és a WaitForReadyAsync közötti versenyhelyzetben.
 /// </summary>
-public class PipeClient : IAsyncDisposable
+public class PipeClient : IPipeClient, IAsyncDisposable
 {
     private readonly string _pipeName;
 
@@ -214,25 +215,31 @@ public class PipeClient : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
+        // 1. CTS cancel – jelzi az event loop-nak hogy le kell állni
         if (_eventLoopCts is not null)
         {
             await _eventLoopCts.CancelAsync();
             _eventLoopCts.Dispose();
         }
 
+        // 2. Pipe lezárás – feloldja a blokkoló ParseDelimitedFrom hívást.
+        //    FONTOS: ez az await _eventLoopTask ELŐTT kell, különben
+        //    az event loop soha nem tér vissza (ParseDelimitedFrom blokkol).
+        if (_eventPipe is not null)
+        {
+            try { await _eventPipe.DisposeAsync(); }
+            catch (ObjectDisposedException) { /* WaitForReadyAsync timeout már lezárta */ }
+        }
+
+        // 3. Event loop megvárása – a pipe lezárása már feloldotta
         if (_eventLoopTask is not null)
         {
             try { await _eventLoopTask; }
             catch (OperationCanceledException) { }
         }
 
+        // 4. Command pipe lezárás
         if (_commandPipe is not null)
             await _commandPipe.DisposeAsync();
-
-        if (_eventPipe is not null)
-        {
-            try { await _eventPipe.DisposeAsync(); }
-            catch (ObjectDisposedException) { /* WaitForReadyAsync timeout már lezárta */ }
-        }
     }
 }

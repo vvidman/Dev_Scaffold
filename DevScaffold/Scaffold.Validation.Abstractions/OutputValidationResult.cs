@@ -16,7 +16,7 @@
 
  */
 
-namespace Scaffold.Validation;
+namespace Scaffold.Validation.Abstractions;
 
 /// <summary>
 /// Egy validációs futás összesített eredménye.

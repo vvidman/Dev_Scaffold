@@ -16,6 +16,7 @@
 
  */
 
+using Scaffold.Validation.Abstractions;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -31,7 +32,7 @@ namespace Scaffold.Validation;
 /// A validator yaml opcionális – ha nem létezik, null-t ad vissza,
 /// és a per-step validator a beégetett alapértelmezett szabályokkal fut.
 /// </summary>
-public sealed class ValidatorYamlReader
+public sealed class ValidatorYamlReader : IValidatorRuleSetReader
 {
     private readonly IDeserializer _deserializer;
 
@@ -43,13 +44,11 @@ public sealed class ValidatorYamlReader
             .Build();
     }
 
-    /// <summary>
-    /// Megpróbálja betölteni a validator yaml-t.
-    /// Ha a fájl nem létezik, null-t ad vissza (nem dob kivételt).
-    /// </summary>
-    /// <param name="validatorYamlPath">A validator yaml teljes elérési útja.</param>
-    public ValidatorRuleSet? TryLoad(string validatorYamlPath)
+    /// <inheritdoc />
+    public ValidatorRuleSet? TryLoad(string stepConfigPath, string stepId)
     {
+        var validatorYamlPath = ResolveValidatorPath(stepConfigPath, stepId);
+
         if (!File.Exists(validatorYamlPath))
             return null;
 
@@ -64,7 +63,7 @@ public sealed class ValidatorYamlReader
     /// Pl.: /config/task_breakdown_agent.yaml + step="task_breakdown"
     ///   → /config/task_breakdown_validator.yaml
     /// </summary>
-    public static string ResolveValidatorPath(string stepConfigPath, string stepId) =>
+    private static string ResolveValidatorPath(string stepConfigPath, string stepId) =>
         Path.Combine(
             Path.GetDirectoryName(stepConfigPath) ?? ".",
             $"{stepId}_validator.yaml");

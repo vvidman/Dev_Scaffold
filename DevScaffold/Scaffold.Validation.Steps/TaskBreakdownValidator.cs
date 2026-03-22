@@ -16,7 +16,7 @@
 
  */
 
-using Scaffold.Validation.Abstract;
+using Scaffold.Validation.Abstractions;
 using System.Text.RegularExpressions;
 
 namespace Scaffold.Validation.Steps;

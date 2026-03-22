@@ -22,6 +22,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Scaffold.Agent.Protocol;
 using Scaffold.Domain.Models;
+using Scaffold.ServiceHost.Abstractions;
 
 namespace Scaffold.ServiceHost;
 

@@ -16,7 +16,7 @@
 
  */
 
-namespace Scaffold.Validation;
+namespace Scaffold.Validation.Abstractions;
 
 /// <summary>
 /// Deklaratív validációs szabálykészlet, yaml fájlból töltve.

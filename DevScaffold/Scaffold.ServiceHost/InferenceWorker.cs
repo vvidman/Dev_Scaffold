@@ -17,7 +17,7 @@
  */
 
 using Scaffold.Agent.Protocol;
-using System.Text;
+using Scaffold.ServiceHost.Abstractions;
 
 namespace Scaffold.ServiceHost;
 
@@ -42,10 +42,10 @@ namespace Scaffold.ServiceHost;
 /// - Periodikus InferenceProgressEvent küldése
 /// - InferenceCompletedEvent / InferenceFailedEvent / InferenceCancelledEvent küldése
 /// </summary>
-public class InferenceWorker
+public class InferenceWorker : IInferenceWorker
 {
-    private readonly ModelCache _modelCache;
-    private readonly EventPublisher _eventPublisher;
+    private readonly IInferenceBackendProvider _modelCache;
+    private readonly IInferenceEventPublisher _eventPublisher;
     private readonly string _outputBasePath;
 
     // Az aktív inference CancellationTokenSource-a
@@ -55,8 +55,8 @@ public class InferenceWorker
     private static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(30);
 
     public InferenceWorker(
-        ModelCache modelCache,
-        EventPublisher eventPublisher,
+        IInferenceBackendProvider modelCache,
+        IInferenceEventPublisher eventPublisher,
         string outputBasePath)
     {
         _modelCache = modelCache;
@@ -246,50 +246,5 @@ public class InferenceWorker
             : Path.Combine(_outputBasePath, request.StepId);
 
         return Path.Combine(folder, $"{request.StepId}_{shortId}.md");
-    }
-
-    // ─────────────────────────────────────────────
-    // CountingTextWriter
-    // ─────────────────────────────────────────────
-
-    /// <summary>
-    /// TextWriter decorator ami megszámolja a backend WriteAsync hívásait.
-    /// Minden nem-üres WriteAsync hívás egy tokennek számít – ez közelítő érték,
-    /// de elegendő a tok/s kijelzéséhez.
-    ///
-    /// Thread-safe: Interlocked.Increment biztosítja a számlálót,
-    /// az összes többi hívás az inner writer-re delegál.
-    /// </summary>
-    private sealed class CountingTextWriter : TextWriter
-    {
-        private readonly TextWriter _inner;
-        private int _tokenCount;
-
-        public int TokenCount => _tokenCount;
-
-        public CountingTextWriter(TextWriter inner) => _inner = inner;
-
-        public override Encoding Encoding => _inner.Encoding;
-
-        public override async Task WriteAsync(string? value)
-        {
-            if (!string.IsNullOrEmpty(value))
-                Interlocked.Increment(ref _tokenCount);
-
-            await _inner.WriteAsync(value);
-        }
-
-        public override async Task WriteAsync(char value)
-        {
-            Interlocked.Increment(ref _tokenCount);
-            await _inner.WriteAsync(value);
-        }
-
-        public override Task FlushAsync() => _inner.FlushAsync();
-        public override Task FlushAsync(CancellationToken cancellationToken) =>
-            _inner.FlushAsync(cancellationToken);
-
-        // Dispose nem zárja be az inner writert – az InferenceWorker kezeli
-        protected override void Dispose(bool disposing) { }
     }
 }

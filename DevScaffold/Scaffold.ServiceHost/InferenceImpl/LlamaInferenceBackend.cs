@@ -21,6 +21,7 @@ using LLama.Abstractions;
 using LLama.Common;
 using Scaffold.Agent.Protocol;
 using Scaffold.Domain.Models;
+using Scaffold.ServiceHost.Abstractions;
 
 namespace Scaffold.ServiceHost.InferenceImpl;
 

@@ -1,207 +1,232 @@
 # ADR – Scaffold ServiceHost
 
-**Dátum:** 2026-03-06  
-**Frissítve:** 2026-03-17  
-**Státusz:** Elfogadott  
-**Érintett projektek:** Scaffold.ServiceHost
+**Date:** 2026-03-06
+**Updated:** 2026-03-22
+**Status:** Accepted
+**Affected projects:** Scaffold.ServiceHost, Scaffold.ServiceHost.Abstractions
 
 ---
 
-## Kontextus
+## Context
 
-A Scaffold Protocol human-in-the-loop pipeline modelljében a CLI lépés szintű – minden `DevScaffold run` hívás egy önálló process. A modellek betöltése CPU-n 30–60 másodpercet vesz igénybe, ezért a modell lifecycle-t nem szabad a CLI lifecycle-hoz kötni. A ServiceHost ezt oldja meg: háttérben fut, a modelleket memóriában tartja, és Named Pipe-on keresztül fogadja a CLI parancsait.
-
----
-
-## Döntések
+In the Scaffold Protocol human-in-the-loop pipeline model, the CLI is step-scoped — each `DevScaffold --step` invocation is an independent process. Loading models on CPU takes 30–60 seconds, so model lifecycle must not be tied to the CLI lifecycle. The ServiceHost solves this: it runs in the background, keeps models in memory, and receives CLI commands via Named Pipe.
 
 ---
 
-### 1. ServiceHost mint önálló háttérprocess
-
-**Döntés:** A ServiceHost önálló .NET consolos process, amelyet az első `DevScaffold run` híváskor a CLI indít el, és explicit `DevScaffold shutdown` parancsig fut.
-
-**Indoklás:**
-- A CLI process rövid életű – a modell betöltési idő a CLI számára elfogadhatatlan lenne
-- A modellek memóriában tartása a lépések között a ServiceHost felelőssége
-- A ServiceHost lifecycle független a CLI lifecycle-tól – explicit shutdown szándékos döntés
+## Decisions
 
 ---
 
-### 2. Két egyirányú Named Pipe – nem egy kétirányú
+### 1. ServiceHost as an independent background process
 
-**Döntés:** Két külön `NamedPipeServerStream` – egy parancs pipe (CLI → ServiceHost) és egy esemény pipe (ServiceHost → CLI) – ahelyett hogy egy kétirányú pipe lenne.
+**Decision:** The ServiceHost is a standalone .NET console process, started by the CLI on the first `--step` invocation, and running until an explicit `DevScaffold shutdown` command is received.
 
-**Indoklás:**
-- Két egyirányú pipe egyértelműbb ownership-et ad: a `PipeServer` olvassa a parancs pipe-ot, az `EventPublisher` írja az esemény pipe-ot
-- A kétirányú pipe esetén az olvasási és írási műveletek interfereálhatnak egymással egy szál esetén
-- A két pipe aszinkron, egymástól független élettartamot tesz lehetővé
-
-**Pipe nevek:** `{pipeName}-commands` és `{pipeName}-events`
+**Rationale:**
+- The CLI process is short-lived — model loading time would be unacceptable at CLI startup
+- Keeping models in memory between steps is the ServiceHost's responsibility
+- The ServiceHost lifecycle is independent of the CLI lifecycle — explicit shutdown is intentional
 
 ---
 
-### 3. Protobuf framing – WriteDelimitedTo / ParseDelimitedFrom
+### 2. Two unidirectional Named Pipes — not one bidirectional pipe
 
-**Döntés:** Az üzenetek varint hossz prefix framing-gel utaznak a pipe-on (`WriteDelimitedTo` / `ParseDelimitedFrom`), nem fix hosszú fejléccel vagy newline delimiter-rel.
+**Decision:** Two separate `NamedPipeServerStream` instances — one command pipe (CLI → ServiceHost) and one event pipe (ServiceHost → CLI) — rather than a single bidirectional pipe.
 
-**Indoklás:**
-- A Protobuf natívan támogatja a delimited framing-et – nincs saját protokoll implementáció
-- A varint prefix hatékony: kis üzeneteknél 1 bájt overhead
-- A `CommandEnvelope` és `EventEnvelope` wrapper típusok egységes keretbe foglalják az összes üzenettípust – a pipe-on mindig ugyanaz a típus utazik
+**Rationale:**
+- Two unidirectional pipes give clearer ownership: `PipeServer` reads the command pipe, `EventPublisher` writes the event pipe
+- With a bidirectional pipe, read and write operations on the same stream can interfere
+- The two pipes have independent, asynchronous lifetimes
 
----
-
-### 4. Indulási sorrend: event pipe előbb, command pipe később
-
-**Döntés:** A ServiceHost először az event pipe-on várja a CLI csatlakozását, elküldi a `ServiceReadyEvent`-et, és csak ezután nyitja meg a command pipe-ot.
-
-**Indoklás:**
-- A CLI oldalon a `WaitForReadyAsync` közvetlenül olvassa az event pipe-ot, az event loop megkerülésével – ezt garantálja a sorrend
-- Ha a command pipe előbb nyílna meg, a CLI parancsot küldhetne mielőtt a ServiceHost felkészül az olvasásra
-- A `ServiceReadyEvent` az egyetlen jelzés a CLI felé hogy a ServiceHost készen áll – a sorrend ezt teszi determinisztikussá
+**Pipe names:** `{pipeName}-commands` and `{pipeName}-events`
 
 ---
 
-### 5. Multi-session support – session loop a PipeServer-ben
+### 3. Protobuf framing — `WriteDelimitedTo` / `ParseDelimitedFrom`
 
-**Döntés:** A `PipeServer.RunAsync` egy külső session loop-ot tartalmaz. Minden CLI session után az `EventPublisher` reseteli az event pipe-ot és a következő CLI kapcsolatot várja.
+**Decision:** Messages travel on the pipe with varint length-prefix framing (`WriteDelimitedTo` / `ParseDelimitedFrom`), not a fixed-length header or newline delimiter.
 
-**Indoklás:**
-- A `NamedPipeServerStream` nem reusable egy lezárt kapcsolat után – új instance kell
-- A ServiceHost a CLI lépés szintű lifecycle-ja miatt több CLI processt szolgál ki egymás után
-- A `ModelCache` és `InferenceWorker` session-független – a reset csak a pipe réteget érinti
+**Rationale:**
+- Protobuf natively supports delimited framing — no custom protocol implementation needed
+- The varint prefix is efficient: 1 byte overhead for small messages
+- `CommandEnvelope` and `EventEnvelope` wrapper types provide a uniform frame — the pipe always carries the same type
+
+---
+
+### 4. Startup order: event pipe first, command pipe second
+
+**Decision:** The ServiceHost first waits for the CLI to connect on the event pipe, sends `ServiceReadyEvent`, and only then opens the command pipe.
+
+**Rationale:**
+- On the CLI side, `WaitForReadyAsync` reads the event pipe directly, bypassing the event loop — this order guarantees that
+- If the command pipe opened first, the CLI could send a command before the ServiceHost is ready to read
+- `ServiceReadyEvent` is the only signal to the CLI that the ServiceHost is ready — the ordering makes this deterministic
+
+---
+
+### 5. Multi-session support — session loop in `PipeServer`
+
+**Decision:** `PipeServer.RunAsync` contains an outer session loop. After each CLI session, `EventPublisher` resets the event pipe and waits for the next CLI connection.
+
+**Rationale:**
+- `NamedPipeServerStream` is not reusable after a connection is closed — a new instance is needed
+- The ServiceHost serves multiple CLI processes in sequence due to the step-scoped CLI lifecycle
+- `ModelCache` and `InferenceWorker` are session-independent — the reset affects only the pipe layer
 
 **Session lifecycle:**
 ```
 [session loop start]
-  EventPublisher.WaitForConnectionAsync()  → CLI csatlakozik
-  EventPublisher.PublishServiceReadyAsync()
-  PipeServer: command pipe nyitása          → CLI csatlakozik
-  RunCommandLoopAsync()                     → CLI kilép → pipe lezárul
+  IPipeConnectionLifecycle.WaitForConnectionAsync()    → CLI connects
+  IServiceEventPublisher.PublishServiceReadyAsync()
+  PipeServer: open command pipe                         → CLI connects
+  RunCommandLoopAsync()                                 → CLI exits → pipe closes
   commandPipe.DisposeAsync()
-  EventPublisher.ResetForNewConnectionAsync() → új pipe instance
-[session loop újraindul]
+  IPipeConnectionLifecycle.ResetForNewConnectionAsync() → new pipe instance
+[session loop restarts]
 ```
 
 ---
 
-### 6. EventPublisher – SemaphoreSlim thread safety
+### 6. `EventPublisher` — `SemaphoreSlim` thread safety
 
-**Döntés:** Az `EventPublisher` egy `SemaphoreSlim(1,1)` lockkal biztosítja hogy egyszerre csak egy `EventEnvelope` kerül a pipe-ra.
+**Decision:** `EventPublisher` uses a `SemaphoreSlim(1,1)` lock to ensure that only one `EventEnvelope` is written to the pipe at a time.
 
-**Indoklás:**
-- Az `InferenceWorker` progress timerje és a `ModelCache` státusz eseményei párhuzamosan futhatnak
-- A pipe stream nem thread-safe – a lock nélkül az üzenetek keveredhetnek
-- A `SemaphoreSlim` aszinkron lock – nem blokkolja a szálat, csak a async folyamatot
+**Rationale:**
+- The `InferenceWorker` progress timer and `ModelCache` status events can fire concurrently
+- The pipe stream is not thread-safe — without a lock, messages could interleave
+- `SemaphoreSlim` is an async lock — it does not block the thread, only the async continuation
 
 ---
 
-### 7. ModelCache – lazy betöltés, per-alias lock
+### 7. `ModelCache` — lazy loading, per-alias lock, `IInferenceBackendFactory`
 
-**Döntés:** A `ModelCache` lazy betöltést alkalmaz – a modell az első `GetOrLoadAsync` hívásakor töltődik be. A thread safety per-alias `SemaphoreSlim`-mel biztosított, nem globális lockkal.
+**Decision:** `ModelCache` uses lazy loading — a model is loaded on the first `GetOrLoadAsync` call. Thread safety is ensured by a per-alias `SemaphoreSlim`, not a global lock. Backend instantiation is delegated to `IInferenceBackendFactory` — `ModelCache` has no knowledge of whether LLamaSharp or an API backend is created.
 
-**Indoklás:**
-- A ServiceHost indulása azonnali – nem kell megvárni a modell betöltést
-- Per-alias lock: ha két különböző modellt kellene párhuzamosan betölteni, nem blokkolják egymást
-- Double-check pattern: a per-alias lockon belül ismét ellenőrzi a cache-t – elkerüli a dupla betöltést versenyhelyzet esetén
+**Rationale:**
+- The ServiceHost starts immediately — no need to wait for model loading at startup
+- Per-alias lock: if two different models need to be loaded concurrently, they do not block each other
+- Double-check pattern: the cache is checked again inside the per-alias lock — avoids duplicate loading under race conditions
 
-**Betöltési sorrend (per alias):**
+**Why `IInferenceBackendFactory`:**
+- OCP: introducing a new backend type (e.g. gRPC-based remote inference) requires only a new factory implementation — `ModelCache` does not change
+- `DefaultInferenceBackendFactory` owns the `HttpClient` shared by all `ApiInferenceBackend` instances
+- The path-based type determination (`http://` prefix check) is a factory internal detail — it does not leak into the cache
+
+**Loading order (per alias):**
 ```
 _dictionaryLock → cache hit? → return
                 → miss: per-alias lock
                   → _dictionaryLock (double-check) → cache hit? → return
-                                                    → miss: LoadModelAsync
+                                                    → miss: IInferenceBackendFactory.CreateAsync
 ```
 
 ---
 
-### 8. ModelCache esemény – delegate, nem közvetlen függőség
+### 8. `ModelCache` event — delegate, not direct dependency
 
-**Döntés:** A `ModelCache` `event Func<string, ModelStatus, string, Task>? ModelStatusChanged` delegate-en keresztül értesíti az `EventPublisher`-t, nem tart közvetlen referenciát rá.
+**Decision:** `ModelCache` notifies the event layer via `event Func<string, ModelStatus, string, Task>? ModelStatusChanged`, rather than holding a direct reference to `IServiceEventPublisher`.
 
-**Indoklás:**
-- A `ModelCache` nem függ az `EventPublisher`-től – tesztelhető önállóan
-- A `Program.cs` köti össze a két komponenst – a wiring egy helyen van
-- Az event delegate opcionális (`?`) – a `ModelCache` tesztekben esemény handler nélkül is használható
-
----
-
-### 9. InferenceWorker – fire and forget a command loop védelmében
-
-**Döntés:** A `CommandDispatcher` az `InferRequest`-et `Task.Run`-nal fire-and-forget jelleggel indítja, nem `await`-eli.
-
-**Indoklás:**
-- Az inference futás percekig tarthat – ha a `CommandDispatcher` await-elné, a command pipe olvasása blokkolt lenne
-- A `CancelInferRequest` csak akkor érkezhet meg ha a command loop fut – tehát a command loop nem blokkolható
-- Az `InferenceWorker` saját maga küldi az `InferenceCompletedEvent` / `InferenceFailedEvent` eseményeket
+**Rationale:**
+- `ModelCache` does not depend on `IServiceEventPublisher` — testable in isolation
+- `Program.cs` wires the two components together — the composition is in one place
+- The event delegate is optional (`?`) — `ModelCache` is usable in tests without an event handler
 
 ---
 
-### 10. InferenceWorker – SemaphoreSlim az egyszerre futó inference limitáláshoz
+### 9. `InferenceWorker` — fire-and-forget to protect the command loop
 
-**Döntés:** Az `InferenceWorker` `SemaphoreSlim(1,1)`-et használ annak biztosítására hogy egyszerre csak egy inference futhat.
+**Decision:** `CommandDispatcher` starts inference with `Task.Run` in a fire-and-forget fashion — it does not await it.
 
-**Indoklás:**
-- CPU-only hardveren párhuzamos inference nem előny – ellenkezőleg, mindkét futás lassulna
-- Az `InvalidOperationException` azonnali jelzést ad ha a CLI hibásan küld párhuzamos kérést
-- A per-request cancel (`TODO` komment) a jövőben bevezethetővé válik a jelenlegi struktúra megtartásával
-
----
-
-### 11. Shutdown – ShutdownToken a CommandDispatcher-ben
-
-**Döntés:** A `CommandDispatcher` egy saját `CancellationTokenSource _shutdownCts`-t tart, amelynek `Token`-jét a `PipeServer` figyeli. A `ShutdownRequest` handler ezt canceli – nem állítja le közvetlenül a processt.
-
-**Indoklás:**
-- A `CommandDispatcher` nem tudja és nem kell hogy tudja hogyan áll le a `PipeServer` – csak jelzi a szándékot
-- A `PipeServer` a saját linked token-jén keresztül veszi észre a shutdown jelzést és tisztán lép ki
-- `Environment.Exit` vagy `Process.Kill` helyett az async cancellation pattern egységes és tesztelhető
+**Rationale:**
+- Inference can take minutes — if `CommandDispatcher` awaited it, the command pipe would be blocked
+- `CancelInferRequest` can only arrive if the command loop is running — so the command loop must not be blocked
+- `InferenceWorker` sends `InferenceCompletedEvent` / `InferenceFailedEvent` itself
 
 ---
 
-### 12. Graceful shutdown – Ctrl+C és SIGTERM
+### 10. `InferenceWorker` — `SemaphoreSlim` to limit concurrent inference
 
-**Döntés:** A `Program.cs` `CancelKeyPress` és `ProcessExit` eseményekre iratkozik fel, és a fő `CancellationTokenSource`-ot canceli.
+**Decision:** `InferenceWorker` uses `SemaphoreSlim(1,1)` to ensure that only one inference runs at a time.
 
-**Indoklás:**
-- A `ProcessExit` biztosítja a `ModelCache.DisposeAsync` hívást SIGTERM esetén is
-- A `using var cts` és az `await using` dispose chain garantálja a `LLamaWeights` felszabadítását
-- A `OperationCanceledException` a legfelső szinten elkapott és normál (0) exit code-dal kezelt
+**Rationale:**
+- On CPU-only hardware, parallel inference is not beneficial — both runs would slow down
+- `InvalidOperationException` gives immediate feedback if the CLI incorrectly sends parallel requests
+- Per-request cancel (TODO comment) can be introduced in the future without changing the current structure
 
 ---
 
-### 13. Output path meghatározás – CLI adja, ServiceHost fallback-kel
+### 11. Shutdown — `ShutdownToken` in `CommandDispatcher`
 
-**Döntés:** Az output fájl path-jának elsődleges forrása az `InferRequest.OutputFolder` mező, amelyet a CLI tölt ki. A ServiceHost ezt közvetlenül használja. Ha az `OutputFolder` üres (fallback eset), a ServiceHost a saját `--output` startup paraméteréből számítja a path-t.
+**Decision:** `CommandDispatcher` holds its own `CancellationTokenSource _shutdownCts`, whose `Token` is monitored by `PipeServer`. The `ShutdownRequest` handler cancels it — it does not directly stop the process.
 
-**Fájlnév képzés az `OutputFolder`-en belül:**
+**Rationale:**
+- `CommandDispatcher` does not need to know how `PipeServer` stops — it only signals the intent
+- `PipeServer` detects the shutdown signal via its linked token and exits cleanly
+- Using async cancellation instead of `Environment.Exit` or `Process.Kill` is consistent and testable
+
+---
+
+### 12. Graceful shutdown — Ctrl+C and SIGTERM
+
+**Decision:** `Program.cs` subscribes to `CancelKeyPress` and `ProcessExit` events and cancels the primary `CancellationTokenSource`.
+
+**Rationale:**
+- `ProcessExit` ensures `ModelCache.DisposeAsync` is called on SIGTERM as well
+- The `using var cts` and `await using` dispose chain guarantees that `LLamaWeights` are released
+- `OperationCanceledException` is caught at the top level and treated as a normal (0) exit
+
+---
+
+### 13. Output path — CLI provides, ServiceHost has fallback
+
+**Decision:** The primary source for the output file path is `InferRequest.OutputFolder`, provided by the CLI. The ServiceHost uses it directly. If `OutputFolder` is empty (fallback), the ServiceHost derives the path from its own `--output` startup parameter.
+
+**Filename within `OutputFolder`:**
 ```
 {OutputFolder}/{stepId}_{requestId[..8]}.md
-pl. /output/task_breakdown_2/task_breakdown_abc12345.md
+e.g. /output/MyProject/task_breakdown_2/task_breakdown_abc12345.md
 ```
 
-**Indoklás:**
-- A generáció sorszám a CLI felelőssége (filesystem alapú számítás) – a ServiceHost nem tud erről
-- A ServiceHost csak azt a foldert kapja meg, amelybe írnia kell – nem kell ismernie a projekt struktúrát
-- A fallback (`--output`) visszafelé kompatibilitást biztosít, és lehetővé teszi a ServiceHost önálló tesztelését is
-- A konkrét fájl path az `InferenceCompletedEvent.output_file_path` mezőn keresztül jut vissza a CLI-hez, ahonnan az audit logba és a human validációba kerül
+**Rationale:**
+- Generation number computation is the CLI's responsibility (filesystem-based) — the ServiceHost does not need to know about it
+- The ServiceHost only receives the folder it should write to — it does not need to know the project structure
+- The fallback (`--output`) provides backward compatibility and allows standalone ServiceHost testing
+- The concrete file path is returned to the CLI via `InferenceCompletedEvent.output_file_path`, from where it goes into the audit log and human validation
 
 ---
 
-## Komponens összefoglaló
+## Interface segregation — `Scaffold.ServiceHost.Abstractions`
 
-| Komponens | Egyetlen felelősség | Függőségei |
+ServiceHost internal components communicate through interfaces — concrete implementations are only assembled in the composition root (`Program.cs`).
+
+| Interface | Implemented by | Consumed by |
 |---|---|---|
-| `PipeServer` | Pipe lifecycle, session loop, command olvasás | `CommandDispatcher`, `EventPublisher` |
-| `EventPublisher` | Event pipe írás, thread-safe küldés | – (csak `NamedPipeServerStream`) |
-| `CommandDispatcher` | Parancs routing, shutdown jelzés | `InferenceWorker`, `ModelCache`, `EventPublisher` |
-| `InferenceWorker` | Inference futtatás, progress küldés, output fájl írás | `ModelCache`, `EventPublisher` |
-| `ModelCache` | Lazy modell betöltés, cache kezelés | `ModelRegistryConfig`, `LLamaWeights` |
+| `IInferenceEventPublisher` | `EventPublisher` | `InferenceWorker` |
+| `IServiceEventPublisher` | `EventPublisher` | `PipeServer`, `CommandDispatcher` |
+| `IEventPublisher` | `EventPublisher` | `CommandDispatcher` (both sub-interfaces) |
+| `IPipeConnectionLifecycle` | `EventPublisher` | `PipeServer` |
+| `IInferenceWorker` | `InferenceWorker` | `CommandDispatcher` |
+| `IInferenceBackendProvider` | `ModelCache` | `InferenceWorker` |
+| `IModelCacheManager` | `ModelCache` | `CommandDispatcher` |
+| `IModelCache` | `ModelCache` | composition root |
+| `IInferenceBackend` | `LlamaInferenceBackend`, `ApiInferenceBackend` | `InferenceWorker` (indirectly) |
+| `IInferenceBackendFactory` | `DefaultInferenceBackendFactory` | `ModelCache` |
 
 ---
 
-## Kapcsolódó ADR-ek
+## Component summary
 
-- **ADR-CLI-Refactor** – A CLI vékony kliens döntés, amely meghatározza hogy a ServiceHost mikor indul és mikor áll le, és hogy a CLI határozza meg az output folder struktúrát
-- **ADR-Protocol** – Az `InferRequest.output_folder` mező indoklása
+| Component | Single responsibility | Dependencies |
+|---|---|---|
+| `PipeServer` | Pipe lifecycle, session loop, command reading | `CommandDispatcher`, `IServiceEventPublisher`, `IPipeConnectionLifecycle` |
+| `EventPublisher` | Event pipe writing, thread-safe sending | — (only `NamedPipeServerStream`) |
+| `CommandDispatcher` | Command routing, shutdown signalling | `IInferenceWorker`, `IModelCacheManager`, `IEventPublisher` |
+| `InferenceWorker` | Inference execution, progress events, output file writing | `IInferenceBackendProvider`, `IInferenceEventPublisher` |
+| `ModelCache` | Lazy model loading, cache management | `ModelRegistryConfig`, `IInferenceBackendFactory` |
+| `DefaultInferenceBackendFactory` | Backend instantiation (LLamaSharp / API decision) | `LLamaWeights`, `HttpClient` |
+
+---
+
+## Related ADRs
+
+- **ADR-CLI-Refactor** — The thin client decision, which defines when the ServiceHost starts and stops, and that the CLI determines the output folder structure
+- **ADR-Protocol** — The `InferRequest.output_folder` field rationale

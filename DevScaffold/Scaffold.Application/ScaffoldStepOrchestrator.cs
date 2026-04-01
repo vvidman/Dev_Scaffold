@@ -117,7 +117,7 @@ public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
             attemptNumber++;
 
             var effectiveSystemPrompt = refinementClarification is not null
-                ? _refinementStrategy.BuildRefinedSystemPrompt(
+                ? _refinementStrategy.BuildRefinedSystemPrompt(_auditLogger,
                     agentConfig.SystemPrompt, refinementClarification)
                 : agentConfig.SystemPrompt;
 

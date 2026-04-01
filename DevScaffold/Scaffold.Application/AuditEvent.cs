@@ -47,5 +47,8 @@ public enum AuditEvent
     SessionEnd,
 
     /// <summary>Hiba esemény – infrastruktúra vagy inference szintű hiba.</summary>
-    Error
+    Error,
+
+    /// <summary> Refinement event - Refinement prompt was created. </summary>
+    Refinement,
 }

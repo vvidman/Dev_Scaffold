@@ -48,7 +48,7 @@ public sealed class DefaultInferenceBackendFactory : IInferenceBackendFactory, I
 
         return IsApiEndpoint(config.Path)
             ? new ApiInferenceBackend(config, _httpClient)
-            : await LlamaInferenceBackend.LoadStatelessAsync(config, cancellationToken);
+            : await LlamaInferenceBackend.LoadInteractiveAsync(config, cancellationToken);//await LlamaInferenceBackend.LoadStatelessAsync(config, cancellationToken);
     }
 
     public void Dispose()

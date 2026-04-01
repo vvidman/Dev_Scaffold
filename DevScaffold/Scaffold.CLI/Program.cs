@@ -259,6 +259,32 @@ async Task<int> RunAsync(
         {
             var decision = await session.RunAsync(cancellationToken);
 
+            if (decision.Outcome is ValidationOutcome.Accept or ValidationOutcome.Edit)
+            {
+                var postProcessors = provider.GetServices<IStepPostProcessor>()
+                    .Where(p => p.StepId.Equals(stepId, StringComparison.OrdinalIgnoreCase));
+
+                foreach (var processor in postProcessors)
+                {
+                    try
+                    {
+                        await processor.ProcessAsync(
+                            decision.ValidatedOutputFilePath,
+                            stepOutputFolder,
+                            cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        scaffoldConsole.WriteError(
+                            $"[SCAFFOLD WARNING] Post-processing sikertelen ({processor.StepId}): {ex.Message}");
+                        auditLogger.Log(AuditEvent.Error,
+                            $"reason=post_processor_failed step={processor.StepId} " +
+                            $"message=\"{ex.Message.Replace("\"", "'")}\"");
+                        // Nem dobjuk tovább – a post-processing hiba nem invalidálja az elfogadást
+                    }
+                }
+            }
+
             return decision.Outcome switch
             {
                 ValidationOutcome.Accept => 0,

@@ -47,10 +47,10 @@ steps:
     # Model alias – pontosan meg kell egyeznie a models.yaml-ben definiált névvel.
     model_alias: local-reasoning
 
-  # coding:
-  #   input_config:
+  coding:
+     input_config: d:\Work\ScaffoldOutputs\Expense_Tracker_Project\task_breakdown_1\tasks\task_01.yaml
   #   validator_config:
-  #   model_alias:
+     model_alias: local-coder
   #   # Későbbi stepeknél az input általában az előző step outputja.
   #   # Pl. a task_breakdown step által generált fájl.
   #   input:

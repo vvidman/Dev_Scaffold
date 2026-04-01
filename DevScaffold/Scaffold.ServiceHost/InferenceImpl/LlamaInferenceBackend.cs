@@ -124,15 +124,46 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
                      $"<|user|>{request.UserInput}<|end|>" +
                      $"<|assistant|>";
 
+        //uint tokenCount = 0;
+
+        //await foreach (var token in executor.InferAsync(prompt, inferenceParams, cancellationToken))
+        //{
+        //    cancellationToken.ThrowIfCancellationRequested();
+
+        //    if (inferenceParams.AntiPrompts.Any(ap => token.Contains(ap)))
+        //        break;
+
+        //    await writer.WriteAsync(token);
+        //    await writer.FlushAsync(cancellationToken);
+        //    tokenCount++;
+        //}
+
         uint tokenCount = 0;
+        // Érdemes egy belső listát tartani a lehetséges lezárókról
+        var stopSequences = inferenceParams.AntiPrompts;
 
         await foreach (var token in executor.InferAsync(prompt, inferenceParams, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (inferenceParams.AntiPrompts.Any(ap => token.Contains(ap)))
-                break;
+            // Megnézzük, hogy a jelenlegi token tartalmazza-e valamelyik tiltott szekvenciát
+            var foundStopSequence = stopSequences.FirstOrDefault(s => token.Contains(s));
 
+            if (foundStopSequence != null)
+            {
+                // Ha benne van, csak a lezáró jel ELŐTTI részt írjuk ki
+                var index = token.IndexOf(foundStopSequence);
+                if (index > 0)
+                {
+                    var cleanPart = token.Substring(0, index);
+                    await writer.WriteAsync(cleanPart);
+                }
+
+                // Itt megállunk, a meta-token többi része (vagy egésze) nem kerül a kimenetre
+                break;
+            }
+
+            // Ha nincs benne lezáró, mehet ki a teljes token
             await writer.WriteAsync(token);
             await writer.FlushAsync(cancellationToken);
             tokenCount++;

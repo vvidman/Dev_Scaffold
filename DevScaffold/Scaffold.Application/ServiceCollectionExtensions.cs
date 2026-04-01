@@ -39,6 +39,7 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<IRefinementStrategy, RefinementStrategy>();
         services.AddSingleton<IInferenceResultHandler, InferenceResultHandler>();
+        services.AddSingleton<IStepPostProcessor, TaskBreakdownSplitter>();
         return services;
     }
 }

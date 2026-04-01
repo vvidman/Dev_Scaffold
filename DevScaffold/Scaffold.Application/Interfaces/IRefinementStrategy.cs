@@ -43,5 +43,5 @@ public interface IRefinementStrategy
     /// Az eredeti system promptot kiegészíti a refinement kontextussal.
     /// A clarification forrása lehet automatikus validator vagy human reviewer.
     /// </summary>
-    string BuildRefinedSystemPrompt(string originalSystemPrompt, string clarification);
+    string BuildRefinedSystemPrompt(IAuditLogger logger, string originalSystemPrompt, string clarification);
 }

@@ -107,10 +107,10 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
             violations.Add(new ValidationViolation(
                 RuleId: "TASK_COUNT_VIOLATION",
                 Layer: "StepSpecific",
-                Description: $"Task count: {count}. Elvárt: {min}–{max}.",
+                Description: $"Task count: {count}. Expected number: {min}–{max}.",
                 Severity: ViolationSeverity.Error,
-                FixHint: $"Generálj {min} és {max} közötti számú taskot. "
-                       + $"Jelenlegi: {count}."));
+                FixHint: $"Generate between {min} and {max} number of tasks."
+                       + $"Current number: {count}."));
     }
 
     private static void CheckRequiredFields(
@@ -129,9 +129,9 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
                     violations.Add(new ValidationViolation(
                         RuleId: "MISSING_REQUIRED_FIELD",
                         Layer: "StepSpecific",
-                        Description: $"Task {taskNumber}: hiányzó mező: \"{field}\".",
+                        Description: $"Task {taskNumber}: missing field: \"{field}\".",
                         Severity: ViolationSeverity.Error,
-                        FixHint: $"Task {taskNumber}-nek tartalmaznia kell egy \"{field}:\" sort."));
+                        FixHint: $"Task {taskNumber} must contain a \"{field}:\" line."));
             }
         }
     }
@@ -157,10 +157,10 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
                     violations.Add(new ValidationViolation(
                         RuleId: "FORBIDDEN_AFFECTED_FILE",
                         Layer: "StepSpecific",
-                        Description: $"Tiltott fájl az Affected files sorban: \"{forbidden}\".",
+                        Description: $"Forbidden file in the Affected files row: \"{forbidden}\".",
                         Severity: ViolationSeverity.Error,
-                        FixHint: $"\"{forbidden}\" módosítása tiltott (Open/Closed Principle). "
-                               + "A változtatást a decorator osztályba kell irányítani."));
+                        FixHint: $"Modification of \"{forbidden}\" is prohibited (Open/Closed Principle)."
+                               + "The change must be directed to the decorator class."));
             }
         }
     }
@@ -176,10 +176,10 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
                 violations.Add(new ValidationViolation(
                     RuleId: "FORBIDDEN_KEYWORD",
                     Layer: "StepSpecific",
-                    Description: $"Tiltott kulcsszó a kimenetben: \"{keyword}\".",
+                    Description: $"Forbidden keyword in output: \"{keyword}\".",
                     Severity: ViolationSeverity.Error,
-                    FixHint: $"A kimenet tartalmazza a tiltott \"{keyword}\" kifejezést. "
-                           + "Távolítsd el az erre vonatkozó taskot vagy fogalmazd át."));
+                    FixHint: $"The output contains the forbidden phrase \"{keyword}\"."
+                           + "Remove or rephrase the task."));
         }
     }
 
@@ -194,9 +194,9 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
                 violations.Add(new ValidationViolation(
                     RuleId: "WARNING_KEYWORD",
                     Layer: "StepSpecific",
-                    Description: $"Gyanús kulcsszó a kimentben: \"{keyword}\".",
+                    Description: $"Suspicious keyword in output: \"{keyword}\".",
                     Severity: ViolationSeverity.Warning,
-                    FixHint: $"A kimenet tartalmaz gyanús \"{keyword}\" kifejezést. Humán dönti el hiba-e."));
+                    FixHint: $"The output contains a suspicious phrase \"{keyword}\". Humans will decide if this is an error."));
         }
     }
 
@@ -218,9 +218,9 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
             violations.Add(new ValidationViolation(
                 RuleId: "DUPLICATE_TASK_HEADING",
                 Layer: "StepSpecific",
-                Description: $"Duplikált task heading: \"{dup}\".",
+                Description: $"Duplicate task heading: \"{dup}\".",
                 Severity: ViolationSeverity.Warning,
-                FixHint: "Összevond az ismétlődő taskokat egybe, vagy adj eltérő nevet."));
+                FixHint: "Merge recurring tasks into one or give them a different name."));
     }
 
     /// <summary>

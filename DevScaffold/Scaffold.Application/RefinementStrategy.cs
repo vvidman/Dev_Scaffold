@@ -48,7 +48,7 @@ public sealed class RefinementStrategy : IRefinementStrategy
     }
 
     /// <inheritdoc />
-    public string BuildRefinedSystemPrompt(string originalSystemPrompt, string clarification)
+    public string BuildRefinedSystemPrompt(IAuditLogger logger, string originalSystemPrompt, string clarification)
     {
         var isAutoRefinement = clarification.StartsWith(AutoPrefix);
 
@@ -60,11 +60,15 @@ public sealed class RefinementStrategy : IRefinementStrategy
             ? "The previous attempt was automatically rejected due to rule violations."
             : "The previous attempt was rejected by the human reviewer.";
 
-        return $"{originalSystemPrompt}\n\n" +
-               $"--- REFINEMENT CONTEXT ---\n" +
+        var refinementContent = $"--- REFINEMENT CONTEXT ---\n" +
                $"{header}\n" +
                $"You MUST fix the following issues in this attempt:\n" +
                $"{clarificationText}\n" +
                $"--- END REFINEMENT CONTEXT ---";
+
+        logger.Log(AuditEvent.Refinement, refinementContent);
+
+        return $"{originalSystemPrompt}\n\n" + refinementContent;
+
     }
 }

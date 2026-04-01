@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la /d/Work/DevScaffoldImplementation/DevScaffold/*.sln)",
+      "Bash(wc:*)",
+      "Bash(ls -la /d/Work/DevScaffoldImplementation/DevScaffold/Scaffold.CLI/*.cs)",
+      "Bash(git:*)",
+      "Bash(grep -r PackageReference /d/Work/DevScaffoldImplementation/DevScaffold/*.csproj)",
+      "Bash(find /d/Work/DevScaffoldImplementation/DevScaffold -maxdepth 2 -name *.csproj -exec grep -H PackageReference {})",
+      "Bash(2)",
+      "Bash(xargs grep:*)",
+      "Bash(dotnet build:*)"
+    ]
+  }
+}

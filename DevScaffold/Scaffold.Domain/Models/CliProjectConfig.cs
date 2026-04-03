@@ -35,6 +35,12 @@ public sealed class CliProjectConfig
     /// </summary>
     public string ProjectContext { get; init; } = "";
     public Dictionary<string, StepCliConfig> Steps { get; init; } = new();
+
+    /// <summary>
+    /// A valódi projekt gyökérmappája — az --apply parancs ide másolja
+    /// az artifacts/ tartalmát. Csak --apply használatakor kötelező.
+    /// </summary>
+    public string? ProjectRoot { get; init; }
 }
 
 /// <summary>

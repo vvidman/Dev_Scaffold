@@ -1,0 +1,84 @@
+task_id: "02"
+title: "PostProcessorContext record + IStepPostProcessor interface frissítés"
+depends_on: ["01"]
+
+description: |
+  Jelenleg az IStepPostProcessor.ProcessAsync aláírása:
+    Task ProcessAsync(string acceptedFilePath, string stepOutputFolder, CancellationToken ct)
+  
+  Ezt cseréljük le egy PostProcessorContext record-ra, ami az összes
+  szükséges kontextust egyetlen objektumban viszi, és a jövőben
+  bővíthető újabb mezőkkel anélkül hogy az interface aláírása változna.
+  
+  A TaskBreakdownSplitter (az egyetlen jelenlegi implementáció)
+  szintén frissül az új aláírásra.
+
+files_to_create:
+  - path: DevScaffold/Scaffold.Application/PostProcessorContext.cs
+    content: |
+      namespace Scaffold.Application;
+      
+      /// <summary>
+      /// Az IStepPostProcessor.ProcessAsync hívásának teljes kontextusa.
+      /// Bővíthető újabb mezőkkel anélkül hogy az interface aláírása változna.
+      /// </summary>
+      public sealed record PostProcessorContext(
+          /// <summary>Az elfogadott (Accept/Edit) kimeneti fájl teljes elérési útja.</summary>
+          string AcceptedFilePath,
+          /// <summary>A step generációs mappa (pl. .../task_breakdown_1/).</summary>
+          string StepOutputFolder,
+          /// <summary>A projekt gyökérmappája — --apply művelethez és artifact célútvonalhoz.</summary>
+          string ProjectRootPath,
+          /// <summary>A step azonosítója (pl. "task_breakdown").</summary>
+          string StepId,
+          /// <summary>A generáció sorszáma (1-től indul).</summary>
+          int Generation,
+          /// <summary>
+          /// Az opcionális --input override fájl elérési útja.
+          /// Ha meg volt adva, ez az egyedi taszk YAML (pl. tasks/task_01.yaml).
+          /// Ha null, a futás a globális project_context-tel ment.
+          /// </summary>
+          string? InputOverridePath,
+          /// <summary>
+          /// A code blockokban keresett fájlútvonal hint prefix.
+          /// A step agent config filepath_hint_prefix mezőjéből érkezik.
+          /// Ha null, az IMarkdownArtifactExtractor fallback névgenerálást használ.
+          /// </summary>
+          string? FilepathHintPrefix,
+          /// <summary>Törlési token.</summary>
+          CancellationToken CancellationToken);
+
+files_to_modify:
+  - path: DevScaffold/Scaffold.Application/Interfaces/IStepPostProcessor.cs
+    change: |
+      Cseréld le a ProcessAsync aláírást:
+      
+      Régi:
+        Task ProcessAsync(string acceptedFilePath, string stepOutputFolder, CancellationToken cancellationToken = default);
+      
+      Új:
+        Task ProcessAsync(PostProcessorContext context);
+      
+      A StepId property marad változatlan.
+      Frissítsd a summary kommenteket is hogy a PostProcessorContext-re hivatkozzanak.
+      Távolítsd el a régi paraméterek summary-jait.
+
+  - path: DevScaffold/Scaffold.Application/TaskBreakdownSplitter.cs
+    change: |
+      Frissítsd a ProcessAsync implementációt az új aláírásra.
+      
+      Régi paraméterek:
+        string acceptedFilePath  → context.AcceptedFilePath
+        string stepOutputFolder  → context.StepOutputFolder
+        CancellationToken        → context.CancellationToken
+      
+      Csak az aláírás és a belső hivatkozások változnak.
+      A teljes logika (regex, YAML írás, stb.) érintetlen marad.
+
+acceptance_criteria:
+  - PostProcessorContext.cs létezik a Scaffold.Application namespace-ben
+  - IStepPostProcessor.ProcessAsync egyetlen PostProcessorContext paramétert fogad
+  - TaskBreakdownSplitter lefordul és futás közben ugyanúgy viselkedik mint előtte
+  - A solution lefordul hibák nélkül
+  - Program.cs hívási helyén a fordítási hiba jelzi ahol a context összerakást
+    majd a következő taskban kell javítani (ez várható, nem blokkoló)

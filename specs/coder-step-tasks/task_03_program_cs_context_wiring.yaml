@@ -1,0 +1,71 @@
+task_id: "03"
+title: "Program.cs — PostProcessorContext összerakás"
+depends_on: ["02"]
+
+description: |
+  A task_02 után a Program.cs-ben fordítási hiba van a post-processor
+  hívásnál mert az aláírás megváltozott. Ezt javítjuk, és egyben
+  a PostProcessorContext összes mezőjét helyesen töltjük fel.
+  
+  A FilepathHintPrefix-et a Program.cs önállóan tölti be az
+  IStepAgentConfigReader segítségével (a stepConfigPath már elérhető).
+  
+  A project_root mező még nem létezik a CliProjectConfig-ban
+  (az task_07 feladata), ezért most fallback: string.Empty.
+  Az InputOverridePath szintén null lesz egyelőre (task_04 feladata).
+
+files_to_modify:
+  - path: DevScaffold/Scaffold.CLI/Program.cs
+    change: |
+      A RunAsync metódusban keresd meg a post-processor foreach blokkot:
+      
+        foreach (var processor in postProcessors)
+        {
+            await processor.ProcessAsync(
+                decision.ValidatedOutputFilePath,
+                stepOutputFolder,
+                cancellationToken);
+        }
+      
+      Cseréld le a következőre:
+      
+        // StepAgentConfig betöltése a FilepathHintPrefix kinyeréséhez.
+        // A config már betöltésre került a ScaffoldStepOrchestrator-ban is,
+        // de a Program.cs-nek szüksége van rá a PostProcessorContext építéséhez.
+        // Ez olcsó művelet (fájlolvasás), a modell betöltés a ServiceHostban van.
+        var agentConfigForContext = provider
+            .GetRequiredService<IStepAgentConfigReader>()
+            .Load(stepConfigPath);
+        
+        var postProcessorContext = new PostProcessorContext(
+            AcceptedFilePath:   decision.ValidatedOutputFilePath,
+            StepOutputFolder:   stepOutputFolder,
+            ProjectRootPath:    string.Empty,  // TODO task_07: config.ProjectRoot
+            StepId:             stepId,
+            Generation:         generation,
+            InputOverridePath:  null,           // TODO task_04: --input override
+            FilepathHintPrefix: agentConfigForContext.FilepathHintPrefix,
+            CancellationToken:  cancellationToken);
+        
+        foreach (var processor in postProcessors)
+        {
+            try
+            {
+                await processor.ProcessAsync(postProcessorContext);
+            }
+            catch (Exception ex)
+            {
+                scaffoldConsole.WriteError(
+                    $"[SCAFFOLD WARNING] Post-processing sikertelen ({processor.StepId}): {ex.Message}");
+                auditLogger.Log(AuditEvent.Error,
+                    $"reason=post_processor_failed step={processor.StepId} " +
+                    $"message=\"{ex.Message.Replace("\"", "'")}\"");
+            }
+        }
+
+acceptance_criteria:
+  - A solution lefordul hibák nélkül
+  - A TaskBreakdownSplitter post-processor futása változatlan (context.AcceptedFilePath
+    és context.StepOutputFolder értéke ugyanaz mint korábban)
+  - A PostProcessorContext.ProjectRootPath értéke string.Empty (ideiglenes)
+  - A PostProcessorContext.InputOverridePath értéke null (ideiglenes)

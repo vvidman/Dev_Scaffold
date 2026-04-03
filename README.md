@@ -94,6 +94,7 @@ steps:
 | `project_context` | Path to the shared input YAML passed to every step |
 | `steps.<name>.input_config` | Path to the step agent YAML (system prompt, max_tokens) |
 | `steps.<name>.model_alias` | Which model alias to use for this step |
+| `project_root` | Target directory for --apply. Required only when using --apply. |
 
 ### 2. Model registry — `models.yaml`
 
@@ -211,6 +212,8 @@ output/
     coding_1/
       coding_xyz99887.md
       audit.log
+      artifacts/
+        src/Services/FooService.cs
 ```
 
 ### Audit log format
@@ -263,6 +266,27 @@ Scaffold.CLI --step coding
 Scaffold.CLI --step review
 
 Scaffold.CLI shutdown
+```
+
+---
+
+## Applying Generated Artifacts
+
+After accepting a coding step, generated files are staged in the `artifacts/` folder.
+To copy them into your actual project:
+
+```bash
+DevScaffold --apply coding_1
+DevScaffold --apply coding_1 coding_2    # batch
+DevScaffold --apply coding_1 --dry-run   # preview only
+```
+
+**Important:** Apply always overwrites existing files in `project_root` without prompting.
+Review the artifact contents before applying.
+
+Configure `project_root` in `Scaffold.CLI.yaml`:
+```yaml
+project_root: ../MyActualProject/
 ```
 
 ---

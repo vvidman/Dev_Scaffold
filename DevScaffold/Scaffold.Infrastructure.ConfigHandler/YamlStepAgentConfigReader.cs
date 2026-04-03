@@ -38,6 +38,10 @@ public class YamlStepAgentConfigReader : IStepAgentConfigReader
             .Build();
     }
 
+    // Új opcionális mezők (pl. FilepathHintPrefix) nem igényelnek módosítást itt.
+    // Az UnderscoredNamingConvention automatikusan leképezi a snake_case YAML kulcsokat
+    // PascalCase property-kre, az IgnoreUnmatchedProperties pedig biztosítja, hogy
+    // hiányzó mezők ne okozzanak hibát. Ez tudatos, explicit tervezési döntés.
     public StepAgentConfig Load(string yamlPath)
     {
         if (!File.Exists(yamlPath))

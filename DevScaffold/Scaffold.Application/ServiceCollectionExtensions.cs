@@ -17,6 +17,7 @@
  */
 
 using Microsoft.Extensions.DependencyInjection;
+using Scaffold.Application.Artifacts;
 using Scaffold.Application.Interfaces;
 
 namespace Scaffold.Application;
@@ -39,7 +40,9 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton<IRefinementStrategy, RefinementStrategy>();
         services.AddSingleton<IInferenceResultHandler, InferenceResultHandler>();
+        services.AddSingleton<IMarkdownArtifactExtractor, DefaultMarkdownArtifactExtractor>();
         services.AddSingleton<IStepPostProcessor, TaskBreakdownSplitter>();
+        services.AddSingleton<IStepPostProcessor, CodingOutputExtractor>();
         return services;
     }
 }

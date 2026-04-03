@@ -67,19 +67,16 @@ internal sealed class TaskBreakdownSplitter : IStepPostProcessor
         _console = console;
     }
 
-    public async Task ProcessAsync(
-        string acceptedFilePath,
-        string stepOutputFolder,
-        CancellationToken cancellationToken = default)
+    public async Task ProcessAsync(PostProcessorContext context)
     {
-        if (!File.Exists(acceptedFilePath))
+        if (!File.Exists(context.AcceptedFilePath))
         {
             _console.WriteError(
-                $"[SCAFFOLD WARNING] TaskBreakdownSplitter: fájl nem található: {acceptedFilePath}");
+                $"[SCAFFOLD WARNING] TaskBreakdownSplitter: fájl nem található: {context.AcceptedFilePath}");
             return;
         }
 
-        var content = await File.ReadAllTextAsync(acceptedFilePath, cancellationToken);
+        var content = await File.ReadAllTextAsync(context.AcceptedFilePath, context.CancellationToken);
         var tasks = SplitIntoTaskBlocks(content);
 
         if (tasks.Count == 0)
@@ -89,7 +86,7 @@ internal sealed class TaskBreakdownSplitter : IStepPostProcessor
             return;
         }
 
-        var tasksFolder = Path.Combine(stepOutputFolder, "tasks");
+        var tasksFolder = Path.Combine(context.StepOutputFolder, "tasks");
         Directory.CreateDirectory(tasksFolder);
 
         for (var i = 0; i < tasks.Count; i++)
@@ -99,7 +96,7 @@ internal sealed class TaskBreakdownSplitter : IStepPostProcessor
             var filePath = Path.Combine(tasksFolder, fileName);
 
             var yaml = YamlSerializer.Serialize(model);
-            await File.WriteAllTextAsync(filePath, yaml, cancellationToken);
+            await File.WriteAllTextAsync(filePath, yaml, context.CancellationToken);
         }
 
         _console.WriteCli(
@@ -185,8 +182,8 @@ internal sealed class TaskBreakdownSplitter : IStepPostProcessor
 /// </summary>
 internal sealed class TaskYamlModel
 {
-    public string Step { get; set; }
-    public string SystemPrompt { get; set; }
-    public string OutputFormat { get; set; }
+    public required string Step { get; set; }
+    public required string SystemPrompt { get; set; }
+    public required string OutputFormat { get; set; }
     public int MaxTokens { get; init; } = 4000;
 }

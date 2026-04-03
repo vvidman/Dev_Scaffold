@@ -31,9 +31,15 @@ public interface IInputAssembler
     /// <summary>
     /// Beolvassa az input yaml fájlt, feloldja az összes path referenciát,
     /// és visszaad egy teljes, AI-nak átadható kontextus stringet.
+    /// Ha secondaryInputYamlPath meg van adva, annak tartalma a primary input
+    /// után fűződik "\n\n---\n\n" elválasztóval.
     /// </summary>
     /// <exception cref="ScaffoldInputValidationException">
     /// Ha bármely path referencia nem található.
     /// </exception>
-    string Assemble(string inputYamlPath, string stepId);
+    /// <param name="secondaryInputYamlPath">
+    /// Opcionális másodlagos input YAML (pl. tasks/task_01.yaml).
+    /// Ha null, a viselkedés azonos a korábbival.
+    /// </param>
+    string Assemble(string inputYamlPath, string stepId, string? secondaryInputYamlPath = null);
 }

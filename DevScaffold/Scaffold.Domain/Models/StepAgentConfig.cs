@@ -51,4 +51,12 @@ public class StepAgentConfig
     /// Ha nincs megadva (null), a backend alapértelmezése érvényes.
     /// </summary>
     public int? MaxTokens { get; init; }
+
+    /// <summary>
+    /// A code blockokban használt fájlútvonal hint prefix.
+    /// Pl. "// filepath:" – az IMarkdownArtifactExtractor ezt keresi.
+    /// Ha null, az extractor fallback névgenerálást használ.
+    /// Csak artifact-generáló stepeknél szükséges (pl. coding, test_generation).
+    /// </summary>
+    public string? FilepathHintPrefix { get; init; }
 }

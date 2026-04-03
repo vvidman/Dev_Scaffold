@@ -1,0 +1,46 @@
+task_id: "01"
+title: "StepAgentConfig — FilepathHintPrefix mező hozzáadása"
+depends_on: []
+
+description: |
+  A StepAgentConfig domain modellt és a YamlStepAgentConfigReader-t
+  ki kell bővíteni egy opcionális FilepathHintPrefix mezővel.
+  Ez a mező azt a string prefixet definiálja, amellyel a modell
+  a generált code blockokban jelöli a célfájl útvonalát.
+  Például: "// filepath:" (C# konvenció).
+  
+  Az IMarkdownArtifactExtractor később ebből tudja, mit keressen
+  a code blockokban fájlnév hint gyanánt.
+
+files_to_modify:
+  - path: DevScaffold/Scaffold.Domain/Models/StepAgentConfig.cs
+    change: |
+      Adj hozzá egy opcionális FilepathHintPrefix property-t:
+        /// <summary>
+        /// A code blockokban használt fájlútvonal hint prefix.
+        /// Pl. "// filepath:" – az IMarkdownArtifactExtractor ezt keresi.
+        /// Ha null, az extractor fallback névgenerálást használ.
+        /// Csak artifact-generáló stepeknél szükséges (pl. coding, test_generation).
+        /// </summary>
+        public string? FilepathHintPrefix { get; init; }
+
+  - path: DevScaffold/Scaffold.Infrastructure.ConfigHandler/YamlStepAgentConfigReader.cs
+    change: |
+      Nincs szükség módosításra — a YamlDotNet UnderscoredNamingConvention
+      és IgnoreUnmatchedProperties beállítása már kezeli az új mezőt.
+      A "filepath_hint_prefix" yaml kulcs automatikusan FilepathHintPrefix-re mappolódik.
+      Ellenőrizd hogy valóban így van, és ha igen, csak egy kommentet adj hozzá
+      a LoadAsync metódus fölé hogy ez explicit tudatos döntés.
+
+acceptance_criteria:
+  - StepAgentConfig.FilepathHintPrefix property létezik, típusa string?, init-only
+  - A mező nullable — nem kötelező mezők esetén null az értéke
+  - A YamlStepAgentConfigReader validálása NEM dob hibát ha a mező hiányzik a YAML-ből
+  - A solution lefordul hibák nélkül
+
+example_yaml: |
+  step: coding
+  max_tokens: 3000
+  filepath_hint_prefix: "// filepath:"
+  system_prompt: |
+    You are a senior .NET developer...

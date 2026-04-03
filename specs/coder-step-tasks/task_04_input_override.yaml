@@ -1,0 +1,98 @@
+task_id: "04"
+title: "--input override — ParseArgs, InputAssembler, ScaffoldStepOrchestrator, Program.cs"
+depends_on: ["03"]
+
+description: |
+  Lehetővé tesszük hogy a CLI --input flag-gel egy opcionális másodlagos
+  input YAML-t fogadjon el. Ez a task-specifikus bemenetet jelenti
+  (pl. tasks/task_01.yaml), amely a globális project_context MELLÉ kerül —
+  nem helyette.
+  
+  Az InputAssembler mindkét YAML tartalmát egymás után rakja össze,
+  a project_context előre kerül, a --input utána.
+  
+  A ScaffoldStepOrchestrator kap egy opcionális secondaryInputYamlPath
+  paramétert. Ha null, a viselkedés teljesen azonos a jelenlegivel.
+
+files_to_modify:
+  - path: DevScaffold/Scaffold.Application/Interfaces/IInputAssembler.cs
+    change: |
+      Bővítsd az Assemble metódus aláírását egy opcionális második paraméterrel:
+      
+      Régi:
+        string Assemble(string inputYamlPath, string stepId);
+      
+      Új:
+        string Assemble(string inputYamlPath, string stepId, string? secondaryInputYamlPath = null);
+      
+      A summary kommentben jelezd: ha secondaryInputYamlPath meg van adva,
+      annak tartalma a primary input után fűződik a kontextushoz.
+
+  - path: DevScaffold/Scaffold.Infrastructure.ConfigHandler/InputAssembler.cs
+    change: |
+      Implementáld a secondaryInputYamlPath paramétert az Assemble metódusban.
+      
+      Logika:
+      1. Ha secondaryInputYamlPath null vagy üres: viselkedés változatlan
+      2. Ha meg van adva:
+         a. Ellenőrizd hogy a fájl létezik (dobjon FileNotFoundException ha nem)
+         b. Futtasd a ValidatePathReferences-t a secondary input-ra is
+         c. A BuildContext hívást futtasd mindkét fájlra
+         d. A két kontextust "\n\n---\n\n" elválasztóval fűzd össze
+            (primary előre, secondary utána)
+      
+      A meglévő private metódusok (ValidatePathReferences, BuildContext) 
+      változatlanok maradnak.
+
+  - path: DevScaffold/Scaffold.Application/ScaffoldStepOrchestrator.cs
+    change: |
+      1. Adj hozzá egy opcionális string? _secondaryInputYamlPath mezőt.
+      
+      2. A konstruktor kapjon egy új opcionális paramétert:
+           string? secondaryInputYamlPath = null
+         Ez a meglévő paraméterek UTÁN kerül.
+      
+      3. A RunAsync-ban az Assemble hívást frissítsd:
+           var assembledInput = _inputAssembler.Assemble(
+               _inputYamlPath, agentConfig.Step, _secondaryInputYamlPath);
+      
+      4. Az audit logban naplózd ha van secondary input:
+           if (_secondaryInputYamlPath is not null)
+               _auditLogger.Log(AuditEvent.Config,
+                   $"secondary_input={_secondaryInputYamlPath}");
+
+  - path: DevScaffold/Scaffold.CLI/Program.cs
+    change: |
+      1. ParseArgs bővítése:
+         A --step <n> parsing után keresd az --input <path> flag-et is.
+         Frissítsd a visszatérési típust hogy a stepName mellé az inputOverridePath-t
+         is visszaadja. Pl.:
+           static (string mode, string? stepName, string? inputOverridePath) ParseArgs(...)
+         
+         Parsing logika:
+           for (int i = 0; i < rawArgs.Length - 1; i++)
+           {
+               if (rawArgs[i].Equals("--input", StringComparison.OrdinalIgnoreCase))
+                   inputOverridePath = rawArgs[i + 1];
+           }
+      
+      2. A RunAsync hívásánál add át az inputOverridePath-t.
+      
+      3. A RunAsync szignatúrája kapjon egy string? inputOverride = null paramétert.
+      
+      4. A ScaffoldStepOrchestrator példányosításánál add át:
+           secondaryInputYamlPath: inputOverride
+      
+      5. A PostProcessorContext összerakásánál frissítsd (task_03 TODO komment):
+           InputOverridePath: inputOverride,
+
+acceptance_criteria:
+  - "DevScaffold --step coding" változatlanul működik (backward compatible)
+  - "DevScaffold --step coding --input ./tasks/task_01.yaml" esetén
+    mindkét YAML bekerül az összeszerkesztett inputba
+  - Ha az --input fájl nem létezik, érthető hibaüzenet jelenik meg (exit 1)
+  - A solution lefordul hibák nélkül
+  - Az audit logban megjelenik a secondary_input ha meg volt adva
+
+example_usage: |
+  DevScaffold --step coding --input ./output/MyProject/task_breakdown_1/tasks/task_01.yaml

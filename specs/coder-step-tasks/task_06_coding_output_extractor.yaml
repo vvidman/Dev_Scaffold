@@ -1,0 +1,113 @@
+task_id: "06"
+title: "CodingOutputExtractor — IStepPostProcessor implementáció + DI regisztráció"
+depends_on: ["02", "05"]
+
+description: |
+  Létrehozzuk a coding step post-processorát, amely az elfogadott
+  markdown kimenetből kinyeri a code blockokat és az artifacts/
+  almappába írja őket.
+  
+  A CodingOutputExtractor az IMarkdownArtifactExtractor-t használja
+  (DI-on keresztül kap egyet), és a context.FilepathHintPrefix-et
+  adja át az extractor híváskor.
+  
+  Az artifacts/ mappában megőrzi a relatív útvonalat:
+    context.StepOutputFolder/artifacts/src/Services/FooService.cs
+  
+  Regisztráljuk DI-ba a Program.cs-ben.
+
+files_to_create:
+  - path: DevScaffold/Scaffold.Application/Artifacts/CodingOutputExtractor.cs
+    content: |
+      using Scaffold.Application.Interfaces;
+      
+      namespace Scaffold.Application.Artifacts;
+      
+      /// <summary>
+      /// A coding step elfogadott markdown kimenetéből kinyeri a code blockokat
+      /// és az artifacts/ almappába írja őket.
+      ///
+      /// Output struktúra:
+      ///   {StepOutputFolder}/artifacts/{RelativeFilePath}
+      ///   Pl. .../coding_1/artifacts/src/Services/FooService.cs
+      ///
+      /// Hiba esetén naplóz és visszatér – az elfogadott kimenetet
+      /// nem invalidálhatja az artifact kinyerés sikertelensége.
+      /// </summary>
+      public sealed class CodingOutputExtractor : IStepPostProcessor
+      {
+          private readonly IMarkdownArtifactExtractor _extractor;
+          private readonly IScaffoldConsole _console;
+      
+          public string StepId => "coding";
+      
+          public CodingOutputExtractor(
+              IMarkdownArtifactExtractor extractor,
+              IScaffoldConsole console)
+          {
+              _extractor = extractor;
+              _console = console;
+          }
+      
+          public async Task ProcessAsync(PostProcessorContext context)
+          {
+              var markdownContent = await File.ReadAllTextAsync(
+                  context.AcceptedFilePath, context.CancellationToken);
+      
+              var artifacts = _extractor.Extract(markdownContent, context.FilepathHintPrefix);
+      
+              if (artifacts.Count == 0)
+              {
+                  _console.WriteSession(
+                      "[POST] Coding: nem található code block a kimenetben.");
+                  return;
+              }
+      
+              var artifactsRoot = Path.Combine(context.StepOutputFolder, "artifacts");
+      
+              foreach (var artifact in artifacts)
+              {
+                  var targetPath = Path.Combine(artifactsRoot, artifact.RelativeFilePath);
+                  var targetDir = Path.GetDirectoryName(targetPath)!;
+      
+                  Directory.CreateDirectory(targetDir);
+                  await File.WriteAllTextAsync(targetPath, artifact.Content, context.CancellationToken);
+      
+                  _console.WriteSession($"[POST] Artifact kimentve: {artifact.RelativeFilePath}");
+              }
+      
+              _console.WriteSession(
+                  $"[POST] Coding: {artifacts.Count} artifact kimentve → {artifactsRoot}");
+          }
+      }
+
+files_to_modify:
+  - path: DevScaffold/Scaffold.CLI/Program.cs
+    change: |
+      A DI regisztrációs blokkban, az IStepPostProcessor regisztrációk közelében
+      add hozzá a következőket:
+      
+        // Artifact extractor — megosztott utility, több post-processor is használhatja
+        services.AddSingleton<IMarkdownArtifactExtractor, DefaultMarkdownArtifactExtractor>();
+        
+        // Post-processorok
+        services.AddSingleton<IStepPostProcessor, TaskBreakdownSplitter>();  // már megvan
+        services.AddSingleton<IStepPostProcessor, CodingOutputExtractor>();  // új
+      
+      Szükséges using direktívák:
+        using Scaffold.Application.Artifacts;
+
+acceptance_criteria:
+  - "DevScaffold --step coding" után az artifacts/ mappa létrejön a step output mappában
+  - A code blockokból kinyert fájlok a megadott relatív útvonalakon jelennek meg
+  - Ha nincs code block, a post-processor nem dob hibát, csak naplóz
+  - A TaskBreakdownSplitter regisztráció érintetlen marad
+  - A solution lefordul hibák nélkül
+
+output_structure_example: |
+  output/MyProject/coding_1/
+    coding_abc12345.md          ← LLM raw output (változatlan)
+    audit.log
+    artifacts/
+      src/Services/FooService.cs
+      src/Services/IFooService.cs

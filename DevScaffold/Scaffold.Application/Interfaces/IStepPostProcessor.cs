@@ -35,11 +35,6 @@ public interface IStepPostProcessor
     /// <summary>
     /// Végrehajtja az utófeldolgozást az elfogadott kimeneten.
     /// </summary>
-    /// <param name="acceptedFilePath">Az elfogadott kimeneti fájl teljes elérési útja.</param>
-    /// <param name="stepOutputFolder">A step generációs mappa (pl. .../task_breakdown_1/).</param>
-    /// <param name="cancellationToken">Törlési token.</param>
-    Task ProcessAsync(
-        string acceptedFilePath,
-        string stepOutputFolder,
-        CancellationToken cancellationToken = default);
+    /// <param name="context">A feldolgozás teljes kontextusa (lásd <see cref="PostProcessorContext"/>).</param>
+    Task ProcessAsync(PostProcessorContext context);
 }

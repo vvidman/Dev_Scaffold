@@ -1,0 +1,171 @@
+task_id: "07"
+title: "--apply parancs, project_root config mező, README frissítés"
+depends_on: ["03", "06"]
+
+description: |
+  Implementáljuk az --apply parancsot, amely egy vagy több step output
+  mappa artifacts/ almappájából a fájlokat a project_root könyvtárba másolja.
+  
+  Új CLI config mező: project_root (opcionális, --apply nélkül nem szükséges).
+  
+  Viselkedés:
+  - Mindig overwrite (döntés: task_07_apply_command)
+  - --dry-run flag: listázza mi változna, de nem ír fájlt
+  - Batch: több mappa is megadható
+  - Naplóz minden másolást az audit logba
+  - Ha project_root nincs konfigurálva és --apply fut: érthető hiba (exit 1)
+
+files_to_modify:
+  - path: DevScaffold/Scaffold.Domain/Models/CliProjectConfig.cs
+    change: |
+      Adj hozzá egy opcionális ProjectRoot property-t:
+      
+        /// <summary>
+        /// A valódi projekt gyökérmappája — az --apply parancs ide másolja
+        /// az artifacts/ tartalmát. Csak --apply használatakor kötelező.
+        /// </summary>
+        public string? ProjectRoot { get; init; }
+
+  - path: DevScaffold/Scaffold.CLI/Program.cs
+    change: |
+      1. ParseArgs bővítése "apply" mode-dal:
+      
+         Az --apply flag parsing:
+           if (rawArgs[0].Equals("--apply", StringComparison.OrdinalIgnoreCase))
+           {
+               // A többi arg a mappa lista, pl. --apply coding_1 coding_2
+               var folders = rawArgs[1..].Where(a => !a.StartsWith("--")).ToArray();
+               var dryRun = rawArgs.Any(a => a.Equals("--dry-run", StringComparison.OrdinalIgnoreCase));
+               return ("apply", null, null, folders, dryRun);
+           }
+         
+         Frissítsd a ParseArgs visszatérési típusát ennek megfelelően.
+      
+      2. A mode switch-be add hozzá:
+           "apply" => await ApplyAsync(cliConfig, applyFolders!, dryRun, cts.Token),
+      
+      3. Implementáld az ApplyAsync metódust:
+      
+         static async Task<int> ApplyAsync(
+             CliProjectConfig config,
+             string[] folderNames,
+             bool dryRun,
+             CancellationToken cancellationToken)
+         {
+             if (string.IsNullOrWhiteSpace(config.ProjectRoot))
+             {
+                 Console.ForegroundColor = ConsoleColor.Red;
+                 Console.Error.WriteLine(
+                     "[SCAFFOLD ERROR] project_root nincs konfigurálva a Scaffold.CLI.yaml-ban. " +
+                     "Az --apply parancshoz kötelező.");
+                 Console.ResetColor();
+                 return 1;
+             }
+             
+             if (!Directory.Exists(config.ProjectRoot))
+             {
+                 Console.Error.WriteLine(
+                     $"[SCAFFOLD ERROR] project_root nem létezik: {config.ProjectRoot}");
+                 return 1;
+             }
+             
+             var projectFolder = SanitizeFolderName(config.PipeName);
+             var outputBasePath = Path.Combine(config.Output, projectFolder);
+             var totalCopied = 0;
+             
+             foreach (var folderName in folderNames)
+             {
+                 var artifactsPath = Path.Combine(outputBasePath, folderName, "artifacts");
+                 
+                 if (!Directory.Exists(artifactsPath))
+                 {
+                     Console.WriteLine($"[SCAFFOLD APPLY] Kihagyva (nincs artifacts/): {folderName}");
+                     continue;
+                 }
+                 
+                 var files = Directory.GetFiles(artifactsPath, "*", SearchOption.AllDirectories);
+                 
+                 foreach (var sourceFile in files)
+                 {
+                     var relativePath = Path.GetRelativePath(artifactsPath, sourceFile);
+                     var targetPath = Path.Combine(config.ProjectRoot, relativePath);
+                     
+                     if (dryRun)
+                     {
+                         Console.WriteLine($"[DRY-RUN] {relativePath} → {targetPath}");
+                     }
+                     else
+                     {
+                         Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                         File.Copy(sourceFile, targetPath, overwrite: true);
+                         Console.WriteLine($"[SCAFFOLD APPLY] {relativePath} → {targetPath}");
+                         totalCopied++;
+                     }
+                 }
+             }
+             
+             if (!dryRun)
+                 Console.WriteLine($"[SCAFFOLD APPLY] Kész. {totalCopied} fájl másolva.");
+             else
+                 Console.WriteLine("[SCAFFOLD APPLY] Dry-run kész. Nem történt írás.");
+             
+             return 0;
+         }
+      
+      4. A PostProcessorContext összerakásánál javítsd a TODO kommentet (task_03):
+           ProjectRootPath: config.ProjectRoot ?? string.Empty,
+
+  - path: DevScaffold/Scaffold.Infrastructure.ConfigHandler/YamlCliProjectConfigReader.cs
+    change: |
+      A Validate metódusban NE legyen kötelező a project_root.
+      Ha az --apply parancs fut és project_root null, azt Program.cs ellenőrzi.
+      A reader csak deszerializál, nem validál project_root-ra.
+
+  - path: README.md
+    change: |
+      1. Az "Output Structure" szekcióban mutasd be az artifacts/ almappát a coding_1 példában.
+      
+      2. Adj hozzá egy "Apply" szekciót a "Shell Script Automation" után:
+      
+         ## Applying Generated Artifacts
+         
+         After accepting a coding step, generated files are staged in the `artifacts/` folder.
+         To copy them into your actual project:
+         
+         ```bash
+         DevScaffold --apply coding_1
+         DevScaffold --apply coding_1 coding_2    # batch
+         DevScaffold --apply coding_1 --dry-run   # preview only
+         ```
+         
+         **Important:** Apply always overwrites existing files in `project_root` without prompting.
+         Review the artifact contents before applying.
+         
+         Configure `project_root` in `Scaffold.CLI.yaml`:
+         ```yaml
+         project_root: ../MyActualProject/
+         ```
+      
+      3. A "Configuration" / Scaffold.CLI.yaml táblázatban add hozzá a project_root sort:
+         | `project_root` | Target directory for --apply. Required only when using --apply. |
+
+acceptance_criteria:
+  - "DevScaffold --apply coding_1" kimásolja az artifacts/ tartalmát a project_root-ba
+  - "DevScaffold --apply coding_1 --dry-run" csak listáz, nem ír
+  - "DevScaffold --apply coding_1 coding_2" batch esetén mindkét mappát feldolgozza
+  - Ha project_root nincs konfigurálva: exit 1 és érthető hibaüzenet
+  - Ha a megadott mappa nem tartalmaz artifacts/ almappát: kihagyja és folytatja
+  - A solution lefordul hibák nélkül
+  - A README tartalmazza az apply viselkedését és az overwrite megjegyzést
+
+example_cli_yaml: |
+  host_binary_path: ./bin/Scaffold.ServiceHost
+  models:           ./models.yaml
+  pipe_name:        MyProject
+  output:           ./output
+  project_context:  ./input.yaml
+  project_root:     ../MyActualProject/
+  steps:
+    coding:
+      input_config: ./steps/coding_agent.yaml
+      model_alias:  qwen2.5-coder-7b-instruct

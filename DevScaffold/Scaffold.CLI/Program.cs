@@ -57,7 +57,7 @@ using Scaffold.Validation.Validators;
 //   2 – Reject (a human visszaküldte, újragenerálás szükséges)
 // ─────────────────────────────────────────────
 
-var (mode, stepName) = ParseArgs(Environment.GetCommandLineArgs()[1..]);
+var (mode, stepName, inputOverridePath, applyFolders, dryRun) = ParseArgs(Environment.GetCommandLineArgs()[1..]);
 
 if (mode is "help")
 {
@@ -100,7 +100,8 @@ Console.CancelKeyPress += (_, e) =>
 
 return mode switch
 {
-    "run" => await RunAsync(cliConfig, stepName!, cts.Token),
+    "run"      => await RunAsync(cliConfig, stepName!, inputOverridePath, cts.Token),
+    "apply"    => await ApplyAsync(cliConfig, applyFolders!, dryRun, cts.Token),
     "shutdown" => await ShutdownAsync(cliConfig, cts.Token),
     _ => UnknownMode(mode)
 };
@@ -112,6 +113,7 @@ return mode switch
 async Task<int> RunAsync(
     CliProjectConfig config,
     string step,
+    string? inputOverride,
     CancellationToken cancellationToken)
 {
     // Step-szintű validáció (fájlok megléte, kötelező mezők)
@@ -253,7 +255,8 @@ async Task<int> RunAsync(
             inputYamlPath: inputYamlPath,
             modelAlias: modelAlias,
             stepOutputFolder: stepOutputFolder,
-            generation: generation);
+            generation: generation,
+            secondaryInputYamlPath: inputOverride);
 
         try
         {
@@ -264,14 +267,29 @@ async Task<int> RunAsync(
                 var postProcessors = provider.GetServices<IStepPostProcessor>()
                     .Where(p => p.StepId.Equals(stepId, StringComparison.OrdinalIgnoreCase));
 
+                // StepAgentConfig betöltése a FilepathHintPrefix kinyeréséhez.
+                // A config már betöltésre került a ScaffoldStepOrchestrator-ban is,
+                // de a Program.cs-nek szüksége van rá a PostProcessorContext építéséhez.
+                // Ez olcsó művelet (fájlolvasás), a modell betöltés a ServiceHostban van.
+                var agentConfigForContext = provider
+                    .GetRequiredService<IStepAgentConfigReader>()
+                    .Load(stepConfigPath);
+
+                var postProcessorContext = new PostProcessorContext(
+                    AcceptedFilePath:   decision.ValidatedOutputFilePath,
+                    StepOutputFolder:   stepOutputFolder,
+                    ProjectRootPath:    config.ProjectRoot ?? string.Empty,
+                    StepId:             stepId,
+                    Generation:         generation,
+                    InputOverridePath:  inputOverride,
+                    FilepathHintPrefix: agentConfigForContext.FilepathHintPrefix,
+                    CancellationToken:  cancellationToken);
+
                 foreach (var processor in postProcessors)
                 {
                     try
                     {
-                        await processor.ProcessAsync(
-                            decision.ValidatedOutputFilePath,
-                            stepOutputFolder,
-                            cancellationToken);
+                        await processor.ProcessAsync(postProcessorContext);
                     }
                     catch (Exception ex)
                     {
@@ -439,6 +457,80 @@ static int? TryParseGeneration(string folderName, string stepId)
 }
 
 // ─────────────────────────────────────────────
+// apply (--apply <folder...> [--dry-run])
+// ─────────────────────────────────────────────
+
+static async Task<int> ApplyAsync(
+    CliProjectConfig config,
+    string[] folderNames,
+    bool dryRun,
+    CancellationToken cancellationToken)
+{
+    if (string.IsNullOrWhiteSpace(config.ProjectRoot))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Error.WriteLine(
+            "[SCAFFOLD ERROR] project_root nincs konfigurálva a Scaffold.CLI.yaml-ban. " +
+            "Az --apply parancshoz kötelező.");
+        Console.ResetColor();
+        return 1;
+    }
+
+    if (!Directory.Exists(config.ProjectRoot))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.Error.WriteLine(
+            $"[SCAFFOLD ERROR] project_root nem létezik: {config.ProjectRoot}");
+        Console.ResetColor();
+        return 1;
+    }
+
+    var projectFolder = SanitizeFolderName(config.PipeName);
+    var outputBasePath = Path.Combine(config.Output, projectFolder);
+    var totalCopied = 0;
+
+    foreach (var folderName in folderNames)
+    {
+        var artifactsPath = Path.Combine(outputBasePath, folderName, "artifacts");
+
+        if (!Directory.Exists(artifactsPath))
+        {
+            Console.WriteLine($"[SCAFFOLD APPLY] Kihagyva (nincs artifacts/): {folderName}");
+            continue;
+        }
+
+        var files = Directory.GetFiles(artifactsPath, "*", SearchOption.AllDirectories);
+
+        foreach (var sourceFile in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var relativePath = Path.GetRelativePath(artifactsPath, sourceFile);
+            var targetPath = Path.Combine(config.ProjectRoot, relativePath);
+
+            if (dryRun)
+            {
+                Console.WriteLine($"[DRY-RUN] {relativePath} → {targetPath}");
+            }
+            else
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                File.Copy(sourceFile, targetPath, overwrite: true);
+                Console.WriteLine($"[SCAFFOLD APPLY] {relativePath} → {targetPath}");
+                totalCopied++;
+            }
+        }
+    }
+
+    if (!dryRun)
+        Console.WriteLine($"[SCAFFOLD APPLY] Kész. {totalCopied} fájl másolva.");
+    else
+        Console.WriteLine("[SCAFFOLD APPLY] Dry-run kész. Nem történt írás.");
+
+    return 0;
+}
+
+// ─────────────────────────────────────────────
 // Segédfüggvények
 // ─────────────────────────────────────────────
 
@@ -460,28 +552,43 @@ static string GetCliConfigPath()
 static string SanitizeFolderName(string name) =>
     name.Replace(" ", "_");
 
-static (string mode, string? stepName) ParseArgs(string[] rawArgs)
+static (string mode, string? stepName, string? inputOverridePath, string[]? applyFolders, bool dryRun) ParseArgs(string[] rawArgs)
 {
     if (rawArgs.Length == 0)
-        return ("help", null);
+        return ("help", null, null, null, false);
 
     // shutdown parancs
     if (rawArgs[0].Equals("shutdown", StringComparison.OrdinalIgnoreCase))
-        return ("shutdown", null);
+        return ("shutdown", null, null, null, false);
 
-    // --step <name> → run
+    // --apply <folder...> [--dry-run]
+    if (rawArgs[0].Equals("--apply", StringComparison.OrdinalIgnoreCase))
+    {
+        var folders = rawArgs[1..].Where(a => !a.StartsWith("--")).ToArray();
+        var isDryRun = rawArgs.Any(a => a.Equals("--dry-run", StringComparison.OrdinalIgnoreCase));
+        return ("apply", null, null, folders, isDryRun);
+    }
+
+    string? stepName = null;
+    string? inputOverridePath = null;
+
     for (int i = 0; i < rawArgs.Length - 1; i++)
     {
         if (rawArgs[i].Equals("--step", StringComparison.OrdinalIgnoreCase))
-            return ("run", rawArgs[i + 1]);
+            stepName = rawArgs[i + 1];
+        if (rawArgs[i].Equals("--input", StringComparison.OrdinalIgnoreCase))
+            inputOverridePath = rawArgs[i + 1];
     }
+
+    if (stepName is not null)
+        return ("run", stepName, inputOverridePath, null, false);
 
     // --help vagy ismeretlen
     if (rawArgs.Any(a => a.Equals("--help", StringComparison.OrdinalIgnoreCase)
                       || a.Equals("-h", StringComparison.OrdinalIgnoreCase)))
-        return ("help", null);
+        return ("help", null, null, null, false);
 
-    return ("unknown", rawArgs[0]);
+    return ("unknown", rawArgs[0], null, null, false);
 }
 
 static int UnknownMode(string mode)

@@ -53,6 +53,7 @@ public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
     private readonly string _modelAlias;
     private readonly string _stepOutputFolder;
     private readonly int _generation;
+    private readonly string? _secondaryInputYamlPath;
 
     private const int MaxAttempts = 5;
 
@@ -70,7 +71,8 @@ public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
         string inputYamlPath,
         string modelAlias,
         string stepOutputFolder,
-        int generation)
+        int generation,
+        string? secondaryInputYamlPath = null)
     {
         _pipeClient = pipeClient;
         _configReader = configReader;
@@ -86,6 +88,7 @@ public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
         _modelAlias = modelAlias;
         _stepOutputFolder = stepOutputFolder;
         _generation = generation;
+        _secondaryInputYamlPath = secondaryInputYamlPath;
     }
 
     public async Task<ValidationDecision> RunAsync(CancellationToken cancellationToken = default)
@@ -102,8 +105,13 @@ public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
             $"max_tokens={agentConfig.MaxTokens?.ToString() ?? "default"} " +
             $"output_folder={_stepOutputFolder}");
 
+        if (_secondaryInputYamlPath is not null)
+            _auditLogger.Log(AuditEvent.Config,
+                $"secondary_input={_secondaryInputYamlPath}");
+
         var ruleSet = _ruleSetReader.TryLoad(_stepConfigPath, agentConfig.Step);
-        var assembledInput = _inputAssembler.Assemble(_inputYamlPath, agentConfig.Step);
+        var assembledInput = _inputAssembler.Assemble(
+            _inputYamlPath, agentConfig.Step, _secondaryInputYamlPath);
 
         string? refinementClarification = null;
         var attemptNumber = 0;

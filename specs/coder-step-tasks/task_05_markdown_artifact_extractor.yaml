@@ -1,0 +1,168 @@
+task_id: "05"
+title: "IMarkdownArtifactExtractor — interface és implementáció"
+depends_on: ["01"]
+
+description: |
+  Létrehozzuk az artifact kinyerési absztrakciót és implementációját.
+  Ez a komponens egy markdown szövegből kinyeri az összes code blockot,
+  meghatározza a célfájl útvonalát (filepath hint vagy fallback),
+  és strukturált ExtractedArtifact listát ad vissza.
+  
+  Ezt a komponenst reuseable utility-ként tervezzük:
+  a coding és test_generation post-processorok egyaránt használják.
+  Helye: Scaffold.Application namespace (CA application réteg).
+
+files_to_create:
+  - path: DevScaffold/Scaffold.Application/Artifacts/ExtractedArtifact.cs
+    content: |
+      namespace Scaffold.Application.Artifacts;
+      
+      /// <summary>
+      /// Egyetlen markdown code blockból kinyert artifact.
+      /// </summary>
+      public sealed record ExtractedArtifact(
+          /// <summary>
+          /// A célfájl relatív útvonala a projekt gyökeréhez képest.
+          /// Pl. "src/Services/FooService.cs"
+          /// A filepath hint-ből érkezik, vagy fallback névgenerálással áll elő.
+          /// </summary>
+          string RelativeFilePath,
+          /// <summary>
+          /// A code block language azonosítója (pl. "csharp", "xml", "json").
+          /// Üres string ha a code block language-et nem tartalmaz.
+          /// </summary>
+          string Language,
+          /// <summary>A code block tartalma, vezető/záró whitespace nélkül.</summary>
+          string Content);
+
+  - path: DevScaffold/Scaffold.Application/Artifacts/IMarkdownArtifactExtractor.cs
+    content: |
+      namespace Scaffold.Application.Artifacts;
+      
+      /// <summary>
+      /// Markdown szövegből artifact fájlok kinyerésének absztrakciója.
+      /// </summary>
+      public interface IMarkdownArtifactExtractor
+      {
+          /// <summary>
+          /// Kinyeri az összes code blockot a markdown szövegből.
+          /// </summary>
+          /// <param name="markdownContent">A feldolgozandó markdown szöveg.</param>
+          /// <param name="filepathHintPrefix">
+          /// A code block első sorában keresett prefix (pl. "// filepath:").
+          /// Ha null, minden artifact fallback névgenerálást kap.
+          /// </param>
+          /// <returns>
+          /// A kinyert artifactok listája. Üres lista ha nincs code block.
+          /// Minden code block pontosan egy artifactot eredményez.
+          /// </returns>
+          IReadOnlyList<ExtractedArtifact> Extract(string markdownContent, string? filepathHintPrefix);
+      }
+
+  - path: DevScaffold/Scaffold.Application/Artifacts/DefaultMarkdownArtifactExtractor.cs
+    content: |
+      using System.Text.RegularExpressions;
+      
+      namespace Scaffold.Application.Artifacts;
+      
+      /// <summary>
+      /// Markdown code blockokat kinyerő implementáció.
+      ///
+      /// Feldolgozási szabályok:
+      /// 1. Keres minden ``` ... ``` blokkot (fenced code block)
+      /// 2. Ha a blokk első sora a filepathHintPrefix-szel kezdődik,
+      ///    az utána következő szöveg a RelativeFilePath (trimmelve)
+      ///    és ez a sor NEM kerül bele a Content-be
+      /// 3. Ha nincs filepath hint: fallback "artifact_{N:D2}.{ext}" ahol
+      ///    N a blokk sorszáma (1-től), ext a language-ből képzett kiterjesztés
+      /// 4. Ismeretlen language esetén az ext "txt"
+      ///
+      /// Language → extension leképezés:
+      ///   csharp, cs → cs
+      ///   xml        → xml
+      ///   json       → json
+      ///   yaml, yml  → yaml
+      ///   sql        → sql
+      ///   bash, sh   → sh
+      ///   egyéb      → txt
+      /// </summary>
+      public sealed class DefaultMarkdownArtifactExtractor : IMarkdownArtifactExtractor
+      {
+          // Fenced code block: ```language\ncontent\n```
+          // A language sor opcionális. Multiline, non-greedy content match.
+          private static readonly Regex CodeBlockRegex = new(
+              @"^```(?<lang>[^\r\n]*)\r?\n(?<content>.*?)^```",
+              RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
+      
+          private static readonly Dictionary<string, string> LanguageExtensions =
+              new(StringComparer.OrdinalIgnoreCase)
+              {
+                  ["csharp"] = "cs", ["cs"] = "cs",
+                  ["xml"]    = "xml",
+                  ["json"]   = "json",
+                  ["yaml"]   = "yaml", ["yml"] = "yaml",
+                  ["sql"]    = "sql",
+                  ["bash"]   = "sh",  ["sh"]  = "sh",
+              };
+      
+          public IReadOnlyList<ExtractedArtifact> Extract(
+              string markdownContent,
+              string? filepathHintPrefix)
+          {
+              var results = new List<ExtractedArtifact>();
+              var artifactIndex = 0;
+      
+              foreach (Match match in CodeBlockRegex.Matches(markdownContent))
+              {
+                  artifactIndex++;
+                  var language = match.Groups["lang"].Value.Trim();
+                  var rawContent = match.Groups["content"].Value;
+      
+                  var (filePath, content) = ExtractFilePath(
+                      rawContent, language, filepathHintPrefix, artifactIndex);
+      
+                  if (string.IsNullOrWhiteSpace(content))
+                      continue;
+      
+                  results.Add(new ExtractedArtifact(filePath, language, content.Trim()));
+              }
+      
+              return results;
+          }
+      
+          private static (string FilePath, string Content) ExtractFilePath(
+              string rawContent,
+              string language,
+              string? hintPrefix,
+              int index)
+          {
+              if (hintPrefix is not null)
+              {
+                  var firstLineEnd = rawContent.IndexOf('\n');
+                  if (firstLineEnd > 0)
+                  {
+                      var firstLine = rawContent[..firstLineEnd].Trim();
+                      if (firstLine.StartsWith(hintPrefix, StringComparison.OrdinalIgnoreCase))
+                      {
+                          var path = firstLine[hintPrefix.Length..].Trim();
+                          var content = rawContent[(firstLineEnd + 1)..];
+                          if (!string.IsNullOrWhiteSpace(path))
+                              return (path, content);
+                      }
+                  }
+              }
+      
+              // Fallback névgenerálás
+              var ext = LanguageExtensions.GetValueOrDefault(language, "txt");
+              return ($"artifact_{index:D2}.{ext}", rawContent);
+          }
+      }
+
+acceptance_criteria:
+  - IMarkdownArtifactExtractor és DefaultMarkdownArtifactExtractor létezik
+  - Egyetlen code block esetén 1 artifactot ad vissza
+  - Ha a code block első sora tartalmazza a hint prefixet, a RelativeFilePath helyesen töltődik
+  - Ha nincs hint prefix (null paraméter), a fallback "artifact_01.cs" stílusú nevet ad
+  - Ha a hint prefix megvan de az adott code block nem tartalmazza, fallback nevet kap
+  - Üres markdown esetén üres listát ad vissza
+  - A solution lefordul hibák nélkül

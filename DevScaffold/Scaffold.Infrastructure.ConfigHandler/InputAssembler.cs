@@ -34,7 +34,7 @@ namespace Scaffold.Infrastructure.ConfigHandler;
 /// </summary>
 public class InputAssembler : IInputAssembler
 {
-    public string Assemble(string inputYamlPath, string stepId)
+    public string Assemble(string inputYamlPath, string stepId, string? secondaryInputYamlPath = null)
     {
         if (!File.Exists(inputYamlPath))
             throw new FileNotFoundException(
@@ -44,7 +44,22 @@ public class InputAssembler : IInputAssembler
         var baseDir = Path.GetDirectoryName(Path.GetFullPath(inputYamlPath)) ?? ".";
 
         ValidatePathReferences(yaml, baseDir, stepId);  // inputYamlPath helyett stepId
-        return BuildContext(yaml, baseDir);
+        var primaryContext = BuildContext(yaml, baseDir);
+
+        if (string.IsNullOrEmpty(secondaryInputYamlPath))
+            return primaryContext;
+
+        if (!File.Exists(secondaryInputYamlPath))
+            throw new FileNotFoundException(
+                $"Secondary input fájl nem található: {secondaryInputYamlPath}");
+
+        var secondaryYaml = File.ReadAllText(secondaryInputYamlPath);
+        var secondaryBaseDir = Path.GetDirectoryName(Path.GetFullPath(secondaryInputYamlPath)) ?? ".";
+
+        ValidatePathReferences(secondaryYaml, secondaryBaseDir, stepId);
+        var secondaryContext = BuildContext(secondaryYaml, secondaryBaseDir);
+
+        return primaryContext + "\n\n---\n\n" + secondaryContext;
     }
 
     /// <summary>

@@ -46,6 +46,8 @@ The third refactor round (2026-03-22) introduced Clean Architecture layering and
 **CLI commands:**
 ```bash
 DevScaffold --step <step_name>
+DevScaffold --step <step_name> --input <task_yaml_path>   # secondary task-specific input
+DevScaffold --apply <folder> [<folder2>...] [--dry-run]   # copy artifacts/ → project_root
 DevScaffold shutdown
 ```
 
@@ -123,6 +125,9 @@ DevScaffold shutdown  →  ServiceHost stops                                 →
 | `RefinementStrategy` | Refinement prompt construction for auto and human reject |
 | `FileAuditLogger` | Audit log writing to file, auto-flush |
 | `Program.cs` | Command parsing, generation computation, DI composition root |
+| `TaskBreakdownSplitter` | Post-processor: splits accepted markdown → per-task YAML files in `tasks/` |
+| `CodingOutputExtractor` | Post-processor: extracts code blocks from accepted markdown → `artifacts/` |
+| `DefaultMarkdownArtifactExtractor` | Regex-based fenced code block extraction with `filepath_hint_prefix` resolution |
 
 ---
 
@@ -228,12 +233,17 @@ output/
     task_breakdown_1/     ← first run
       task_breakdown_abc12345.md
       audit.log
+      tasks/              ← TaskBreakdownSplitter output
+        task_01.yaml
+        task_02.yaml
     task_breakdown_2/     ← after first rejection
       task_breakdown_def67890.md
       audit.log
     coding_1/
       coding_xyz99887.md
       audit.log
+      artifacts/          ← CodingOutputExtractor output
+        src/Services/FooService.cs
 ```
 
 **Rationale:**
@@ -309,17 +319,21 @@ The log is written with `AutoFlush = true`.
 
 ## Summary — original vs. refactored CLI
 
-| Aspect | Original CLI | 1st refactor | 2nd refactor | 3rd refactor |
-|---|---|---|---|---|
-| Granularity | Pipeline-scoped | Step-scoped | Step-scoped | Step-scoped |
-| Orchestration | PipelineRunner | Human | Human | Human |
-| Model management | In CLI | ServiceHost | ServiceHost | ServiceHost |
-| Step order | pipeline.yaml | Human decides | Human decides | Human decides |
-| CLI lifecycle | Runs until pipeline end | Exits after one step | Exits after one step | Exits after one step |
-| ServiceHost lifecycle | Tied to CLI | Independent | Independent | Independent |
-| Communication | Direct dependency | Named Pipe | Named Pipe | Named Pipe |
-| Output folder | ServiceHost decides | ServiceHost decides | CLI decides (generation) | CLI decides (generation) |
-| Audit log | None | None | File, auto-flush | File, auto-flush |
-| Console output | Console.WriteLine | Console.WriteLine | Colour-coded | Colour-coded |
-| Session orchestrator | PipelineRunner | ScaffoldSession | ScaffoldSession | ScaffoldStepOrchestrator + InferenceResultHandler + RefinementStrategy |
-| Editor integration | None | None | None | IFileEditorLauncher (cross-platform) |
+| Aspect | Original CLI | 1st refactor | 2nd refactor | 3rd refactor | 4th refactor |
+|---|---|---|---|---|---|
+| Granularity | Pipeline-scoped | Step-scoped | Step-scoped | Step-scoped | Step-scoped |
+| Orchestration | PipelineRunner | Human | Human | Human | Human |
+| Model management | In CLI | ServiceHost | ServiceHost | ServiceHost | ServiceHost |
+| Step order | pipeline.yaml | Human decides | Human decides | Human decides | Human decides |
+| CLI lifecycle | Runs until pipeline end | Exits after one step | Exits after one step | Exits after one step | Exits after one step |
+| ServiceHost lifecycle | Tied to CLI | Independent | Independent | Independent | Independent |
+| Communication | Direct dependency | Named Pipe | Named Pipe | Named Pipe | Named Pipe |
+| Output folder | ServiceHost decides | ServiceHost decides | CLI decides (generation) | CLI decides (generation) | CLI decides (generation) |
+| Audit log | None | None | File, auto-flush | File, auto-flush | File, auto-flush |
+| Console output | Console.WriteLine | Console.WriteLine | Colour-coded | Colour-coded | Colour-coded |
+| Session orchestrator | PipelineRunner | ScaffoldSession | ScaffoldSession | ScaffoldStepOrchestrator + InferenceResultHandler + RefinementStrategy | (unchanged) |
+| Editor integration | None | None | None | IFileEditorLauncher (cross-platform) | (unchanged) |
+| Post-processing | None | None | None | None | IStepPostProcessor pipeline + PostProcessorContext |
+| Artifact extraction | None | None | None | None | IMarkdownArtifactExtractor → artifacts/ |
+| Secondary input | None | None | None | None | --input flag (appended to project_context) |
+| Apply command | None | None | None | None | --apply copies artifacts/ → project_root |

@@ -27,6 +27,10 @@ output: d:\Work\ScaffoldOutputs
 # Ez a projekt fő kontextusa (pl. ./input.yaml).
 project_context: D:\Work\ScaffoldOutputs\Expense_Tracker_Project\base_inputs\input.yaml
 
+# A valódi projekt gyökérmappája — az --apply parancs ide másolja az artifacts/ tartalmát.
+# Csak --apply használatakor kötelező.
+# project_root: D:\Work\MyActualProject\
+
 # ─────────────────────────────────────────────
 # Step definíciók
 #

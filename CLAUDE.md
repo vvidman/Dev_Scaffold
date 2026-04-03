@@ -11,6 +11,12 @@ dotnet build DevScaffold/DevScaffold.slnx
 # Run CLI (executes one step, then exits)
 dotnet run --project DevScaffold/Scaffold.CLI -- --step <step_name>
 
+# Run with a secondary task-specific input (appended after project_context)
+dotnet run --project DevScaffold/Scaffold.CLI -- --step <step_name> --input <task_yaml_path>
+
+# Copy staged artifacts from a step output folder into project_root
+dotnet run --project DevScaffold/Scaffold.CLI -- --apply <step_folder> [--dry-run]
+
 # Shut down the ServiceHost
 dotnet run --project DevScaffold/Scaffold.CLI -- shutdown
 
@@ -65,7 +71,7 @@ When validation fails, a targeted refinement prompt is retried automatically (up
 ### Configuration (YAML)
 
 Multi-layer YAML config:
-- **CLI project config** (`Scaffold.CLI.yaml`) — pipe name, output directory, model aliases, step agent configs
+- **CLI project config** (`Scaffold.CLI.yaml`) — pipe name, output directory, model aliases, step agent configs, optional `project_root` for `--apply`
 - **Model registry** — maps aliases to backend type (LLamaSharp local or OpenAI-compatible API) and model paths
 - **Step agent configs** — per-step system prompt, input references, validator settings
 - **Input YAML** — project-specific inputs assembled by `InputAssembler`
@@ -77,11 +83,14 @@ Multi-layer YAML config:
 - `IFileEditorLauncher` — cross-platform editor launch (defaults to OS file association)
 - `IScaffoldConsole` — three-level color-coded output: CLI (cyan), Session (gray), Validation (yellow), Error (red)
 - `IAuditLogger` — fixed-width plain-text audit log written per-generation to `{output}/{project}/{step}_{generation}/audit.log`
+- `IStepPostProcessor` / `PostProcessorContext` — runs after Accept/Edit; each processor declares its `StepId` and receives a `PostProcessorContext` (accepted file path, output folder, project root, generation, input override, filepath hint prefix); errors are logged but do not invalidate the accepted output
+- `IMarkdownArtifactExtractor` / `DefaultMarkdownArtifactExtractor` — extracts fenced code blocks from markdown; resolves target file paths from a `filepath_hint_prefix` (e.g. `// filepath:`) or falls back to `artifact_NN.ext` naming
 
 ### Extensibility
 
 - **New step**: add YAML step agent config (+ optional `IStepOutputValidator` registered in DI) — no other code changes needed
 - **New validator**: implement `IStepOutputValidator`, register in DI
+- **New post-processor**: implement `IStepPostProcessor`, register in `ServiceCollectionExtensions.AddScaffoldApplication()`; receives `PostProcessorContext` — no signature changes when new context fields are added
 - **New inference backend**: implement `IInferenceBackend`, update `IInferenceBackendFactory`
 - **New UI**: implement `IHumanValidationService`
 

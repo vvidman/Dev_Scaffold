@@ -19,21 +19,21 @@
 namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Event pipe kapcsolat életciklus kezelése.
-/// A PipeServer ezt és az IServiceEventPublisher-t kapja –
-/// a pipe-kezelési részletek nem szennyezik az esemény-publikálási interfészt.
+/// Manages the event pipe connection's lifecycle.
+/// PipeServer receives this and IServiceEventPublisher –
+/// pipe-handling details do not pollute the event-publishing interface.
 /// </summary>
 public interface IPipeConnectionLifecycle
 {
     /// <summary>
-    /// Megvárja hogy a CLI kliens csatlakozzon az event pipe-ra.
-    /// A ServiceHost a ready esemény előtt hívja ezt.
+    /// Waits for the CLI client to connect to the event pipe.
+    /// The ServiceHost calls this before the ready event.
     /// </summary>
     Task WaitForConnectionAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Az előző CLI session pipe-ját elveti és újat nyit.
-    /// A PipeServer hívja mielőtt a következő CLI kapcsolatot várja.
+    /// Discards the previous CLI session's pipe and opens a new one.
+    /// Called by PipeServer before it waits for the next CLI connection.
     /// </summary>
     Task ResetForNewConnectionAsync(CancellationToken cancellationToken = default);
 }

@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -19,9 +19,9 @@
 namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Teljes model cache képesség.
-/// A ModelCache implementálja – a DI kompozícióban ez a regisztrált típus,
-/// amelyből az egyes fogyasztók csak a saját alkészletüket látják.
+/// The full model cache capability.
+/// Implemented by ModelCache – this is the type registered in the DI
+/// composition, from which each consumer only sees its own subset.
 /// </summary>
 public interface IModelCache : IInferenceBackendProvider, IModelCacheManager
 {

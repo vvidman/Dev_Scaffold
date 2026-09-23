@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -19,15 +19,15 @@
 namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Inference backend lekérése alias alapján.
-/// Az InferenceWorker csak ezt az interfészt látja –
-/// nem tudja hogy a backend cache-elt, lazy betöltött, vagy API alapú.
+/// Looks up an inference backend by alias.
+/// InferenceWorker only sees this interface – it does not know whether
+/// the backend is cached, lazily loaded, or API-based.
 /// </summary>
 public interface IInferenceBackendProvider
 {
     /// <summary>
-    /// Visszaadja a betöltött backendet az alias alapján.
-    /// Ha még nincs betöltve, most inicializálja (lazy).
+    /// Returns the loaded backend for the alias.
+    /// If not loaded yet, initializes it now (lazy).
     /// </summary>
     Task<IInferenceBackend> GetOrLoadAsync(
         string requestId,

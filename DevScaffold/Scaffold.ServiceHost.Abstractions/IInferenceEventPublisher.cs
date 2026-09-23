@@ -19,9 +19,9 @@
 namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Inference életciklus eseményeinek publikálása.
-/// Az InferenceWorker csak ezt az interfészt látja –
-/// nem tudja hogy a service réteg milyen eseményeket küld.
+/// Publishes inference lifecycle events.
+/// InferenceWorker only sees this interface –
+/// it does not know what events the service layer sends.
 /// </summary>
 public interface IInferenceEventPublisher
 {

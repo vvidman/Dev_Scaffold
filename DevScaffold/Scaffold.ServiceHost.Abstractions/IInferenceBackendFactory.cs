@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -21,21 +21,21 @@ using Scaffold.Domain.Models;
 namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Inference backend példányosítás absztrakciója.
+/// Abstraction for instantiating inference backends.
 ///
-/// A ModelCache ezt injektálva kapja – nem tudja hogy LLamaSharp,
-/// API, vagy bármilyen más backend kerül létrehozásra.
-/// Új backend típus bevezetésekor csak az implementáció változik,
-/// a ModelCache nem (OCP).
+/// ModelCache receives this via injection – it does not know whether
+/// LLamaSharp, an API, or any other backend gets created.
+/// Introducing a new backend type only changes the implementation,
+/// not ModelCache (OCP).
 /// </summary>
 public interface IInferenceBackendFactory
 {
     /// <summary>
-    /// Létrehozza és inicializálja a megadott konfigurációhoz tartozó backendet.
+    /// Creates and initializes the backend for the given configuration.
     /// </summary>
-    /// <param name="config">A modell konfigurációja (path vagy API endpoint).</param>
-    /// <param name="cancellationToken">Megszakítás token – GGUF betöltés hosszú műveletet végez.</param>
-    /// <returns>Az inicializált, használatra kész backend.</returns>
+    /// <param name="config">The model's configuration (path or API endpoint).</param>
+    /// <param name="cancellationToken">Cancellation token – loading a GGUF is a long-running operation.</param>
+    /// <returns>The initialized, ready-to-use backend.</returns>
     Task<IInferenceBackend> CreateAsync(
         ModelConfig config,
         CancellationToken cancellationToken = default);

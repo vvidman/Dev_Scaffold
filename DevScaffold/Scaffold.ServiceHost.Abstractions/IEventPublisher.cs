@@ -19,11 +19,11 @@
 namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Teljes esemény-publikálási képesség.
-/// A CommandDispatcher ezt kapja – inference és service eseményeket egyaránt küld.
+/// The full event-publishing capability.
+/// CommandDispatcher receives this – it sends both inference and service events.
 ///
-/// Az EventPublisher implementálja, a DI konténer ezt regisztrálja
-/// ahol mindkét alkészlet szükséges.
+/// Implemented by EventPublisher; the DI container registers this
+/// wherever both subsets are needed.
 /// </summary>
 public interface IEventPublisher : IInferenceEventPublisher, IServiceEventPublisher
 {

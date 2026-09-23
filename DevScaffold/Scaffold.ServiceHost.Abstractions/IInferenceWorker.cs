@@ -21,33 +21,33 @@ using Scaffold.Agent.Protocol;
 namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Inference futtatásának absztrakciója.
-/// A CommandDispatcher ezt látja – nem tudja hogy LLamaSharp,
-/// API backend, vagy bármi más hajtja végre az inference-t.
+/// Abstraction for running inference.
+/// CommandDispatcher sees this – it does not know whether LLamaSharp,
+/// an API backend, or anything else executes the inference.
 ///
-/// Egyszerre csak egy inference futhat – az implementáció felelős
-/// a konkurencia kezeléséért.
+/// Only one inference can run at a time – the implementation is
+/// responsible for handling concurrency.
 /// </summary>
 public interface IInferenceWorker
 {
     /// <summary>
-    /// Elindítja az inference futást.
-    /// Ha már fut egy inference, InvalidOperationException-t dob.
+    /// Starts the inference run.
+    /// Throws InvalidOperationException if an inference is already running.
     /// </summary>
     Task RunAsync(
         InferRequest request,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Megszakítja az aktív inference-t.
-    /// Ha nincs aktív inference, no-op.
+    /// Cancels the active inference.
+    /// No-op if there is no active inference.
     /// </summary>
     void Cancel();
 
     /// <summary>
-    /// Megvárja hogy az aktív inference befejezzen.
-    /// Graceful shutdown esetén hívja a CommandDispatcher.
-    /// Ha nincs aktív inference, azonnal visszatér.
+    /// Waits for the active inference to complete.
+    /// Called by CommandDispatcher on graceful shutdown.
+    /// Returns immediately if there is no active inference.
     /// </summary>
     Task WaitForCompletionAsync(CancellationToken cancellationToken = default);
 }

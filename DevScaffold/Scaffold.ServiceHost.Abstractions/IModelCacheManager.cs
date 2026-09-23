@@ -21,24 +21,24 @@ using Scaffold.Agent.Protocol;
 namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Backend cache életciklus kezelése.
-/// A CommandDispatcher és a composition root (Program.cs) ezt kapja –
-/// explicit betöltés, kiürítés és listázás tartozik ide.
+/// Manages the backend cache's lifecycle.
+/// Received by CommandDispatcher and the composition root (Program.cs) –
+/// explicit loading, unloading and listing belong here.
 ///
-/// A ModelStatusChanged eseményre a composition root iratkozik fel,
-/// és az IServiceEventPublisher-en keresztül továbbítja a CLI-nek.
+/// The composition root subscribes to ModelStatusChanged, and forwards
+/// it to the CLI through IServiceEventPublisher.
 /// </summary>
 public interface IModelCacheManager
 {
     /// <summary>
-    /// Esemény – backend státuszváltozáskor tüzel.
-    /// A composition root köti össze az IServiceEventPublisher-rel.
+    /// Event – raised when a backend's status changes.
+    /// The composition root wires this up to IServiceEventPublisher.
     /// </summary>
     event Func<string, ModelStatus, string, Task>? ModelStatusChanged;
 
     /// <summary>
-    /// Explicit backend betöltés – LoadModelRequest hatására.
-    /// Ha már betöltött, no-op.
+    /// Explicit backend load – triggered by LoadModelRequest.
+    /// If already loaded, no-op.
     /// </summary>
     Task LoadAsync(
         string requestId,
@@ -46,7 +46,7 @@ public interface IModelCacheManager
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Backend kiürítése a memóriából.
+    /// Unloads a backend from memory.
     /// </summary>
     Task UnloadAsync(
         string requestId,
@@ -54,7 +54,7 @@ public interface IModelCacheManager
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Visszaadja a betöltött backendek alias listáját.
+    /// Returns the list of aliases for currently loaded backends.
     /// </summary>
     Task<IReadOnlyList<string>> GetLoadedAliasesAsync(
         CancellationToken cancellationToken = default);

@@ -21,8 +21,8 @@ using Scaffold.Agent.Protocol;
 namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Service szintű eseményeinek publikálása.
-/// A PipeServer és a CommandDispatcher service-szintű részeit ez látja.
+/// Publishes service-level events.
+/// Consumed by the service-level parts of PipeServer and CommandDispatcher.
 /// </summary>
 public interface IServiceEventPublisher
 {

@@ -21,15 +21,16 @@ using Scaffold.Agent.Protocol;
 namespace Scaffold.ServiceHost.Abstractions;
 
 /// <summary>
-/// Inference backend absztrakciója.
-/// StreamWriter helyett TextWriter – a hívó CountingTextWriter-t adhat át
-/// anélkül hogy a backend implementációk változnának, mivel StreamWriter : TextWriter.
+/// Abstraction for an inference backend.
+/// TextWriter instead of StreamWriter – the caller can pass a
+/// CountingTextWriter without the backend implementations changing,
+/// since StreamWriter : TextWriter.
 /// </summary>
 public interface IInferenceBackend : IAsyncDisposable
 {
     /// <summary>
-    /// Lefuttatja az inference-t és a generált tokeneket a writer-be írja.
+    /// Runs the inference and writes the generated tokens to the writer.
     /// </summary>
-    /// <returns>A generált tokenek száma.</returns>
+    /// <returns>The number of tokens generated.</returns>
     Task<uint> RunAsync(InferRequest request, TextWriter writer, CancellationToken cancellationToken);
 }

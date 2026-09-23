@@ -21,15 +21,15 @@ using Scaffold.Validation.Abstractions;
 namespace Scaffold.Validation.Validators;
 
 /// <summary>
-/// Az UniversalOutputValidator és a StepValidatorRegistry eredményeit kombinálja.
-/// Ez az IOutputValidator egyetlen DI-ban regisztrált implementációja.
+/// Combines the results of UniversalOutputValidator and StepValidatorRegistry.
+/// This is the only DI-registered implementation of IOutputValidator.
 ///
-/// Futási sorrend:
-///   1. UniversalOutputValidator (belső, nem publikus kontraktum)
-///   2. IStepOutputValidator (ha van regisztrált validator az adott step_id-hoz)
+/// Run order:
+///   1. UniversalOutputValidator (internal, not a public contract)
+///   2. IStepOutputValidator (if a validator is registered for the given step_id)
 ///
-/// Ha az Universal Error-t talál, a per-step validator is lefut –
-/// minden violation összegyűlik a teljes képhez.
+/// If the Universal layer finds an Error, the per-step validator still runs –
+/// all violations are collected into the full picture.
 /// </summary>
 public sealed class CompositeOutputValidator : IOutputValidator
 {
@@ -50,7 +50,7 @@ public sealed class CompositeOutputValidator : IOutputValidator
     {
         var allViolations = new List<ValidationViolation>();
 
-        // 1. Univerzális ellenőrzések
+        // 1. Universal checks
         var universalViolations = _universal.Validate(
             outputContent,
             maxTokensConfigured,
@@ -58,7 +58,7 @@ public sealed class CompositeOutputValidator : IOutputValidator
 
         allViolations.AddRange(universalViolations);
 
-        // 2. Per-step ellenőrzések – üres kimeneten nincs értelme futtatni
+        // 2. Per-step checks – no point running them on empty output
         if (!string.IsNullOrWhiteSpace(outputContent))
         {
             var stepValidator = _registry.Resolve(stepId);

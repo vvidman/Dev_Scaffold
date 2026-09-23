@@ -23,14 +23,14 @@ using YamlDotNet.Serialization.NamingConventions;
 namespace Scaffold.Validation;
 
 /// <summary>
-/// Validator rule set betöltése yaml fájlból.
+/// Loads the validator rule set from a yaml file.
 ///
-/// Konvenció alapú fájlnév-feloldás:
+/// Convention-based filename resolution:
 ///   step agent config: task_breakdown_agent.yaml
-///   validator yaml:    task_breakdown_validator.yaml  (ugyanabban a mappában)
+///   validator yaml:    task_breakdown_validator.yaml  (same folder)
 ///
-/// A validator yaml opcionális – ha nem létezik, null-t ad vissza,
-/// és a per-step validator a beégetett alapértelmezett szabályokkal fut.
+/// The validator yaml is optional – if it does not exist, returns null,
+/// and the per-step validator runs with its built-in default rules.
 /// </summary>
 public sealed class ValidatorYamlReader : IValidatorRuleSetReader
 {
@@ -57,10 +57,10 @@ public sealed class ValidatorYamlReader : IValidatorRuleSetReader
     }
 
     /// <summary>
-    /// Konvenció alapján meghatározza a validator yaml elérési útját
-    /// a step agent config path-ja és a step_id alapján.
+    /// Determines the validator yaml path by convention, from the step
+    /// agent config path and the step_id.
     ///
-    /// Pl.: /config/task_breakdown_agent.yaml + step="task_breakdown"
+    /// E.g.: /config/task_breakdown_agent.yaml + step="task_breakdown"
     ///   → /config/task_breakdown_validator.yaml
     /// </summary>
     private static string ResolveValidatorPath(string stepConfigPath, string stepId) =>

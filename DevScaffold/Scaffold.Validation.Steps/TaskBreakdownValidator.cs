@@ -22,23 +22,23 @@ using System.Text.RegularExpressions;
 namespace Scaffold.Validation.Steps;
 
 /// <summary>
-/// Task breakdown step kimenetének validálása.
+/// Validates the output of the task breakdown step.
 ///
-/// Alapértelmezett szabályok (yaml nélkül is érvényesek):
-///   MISSING_REQUIRED_FIELD    – required_fields hiánya egy taskból       (Error)
-///   TASK_COUNT_VIOLATION      – task_count min/max sértés                (Error)
-///   FORBIDDEN_KEYWORD         – tiltott kulcsszó a kimenetben            (Error)
-///   FORBIDDEN_AFFECTED_FILE   – tiltott fájl az Affected files sorban   (Error)
-///   DUPLICATE_TASK_HEADING    – azonos heading szöveg több tasknál       (Warning)
+/// Default rules (apply even without a yaml):
+///   MISSING_REQUIRED_FIELD    – a task is missing one of required_fields  (Error)
+///   TASK_COUNT_VIOLATION      – task_count min/max violation              (Error)
+///   FORBIDDEN_KEYWORD         – forbidden keyword in the output           (Error)
+///   FORBIDDEN_AFFECTED_FILE   – forbidden file in the Affected files row  (Error)
+///   DUPLICATE_TASK_HEADING    – identical heading text on multiple tasks  (Warning)
 ///
-/// A yaml-ból töltött ValidatorRuleSet felülírja az alapértelmezéseket
-/// ahol átfedés van, és kiegészíti ahol nincs.
+/// A ValidatorRuleSet loaded from yaml overrides the defaults where they
+/// overlap, and extends them where they don't.
 /// </summary>
 public sealed class TaskBreakdownValidator : IStepOutputValidator
 {
     public string StepId => "task_breakdown";
 
-    // Alapértelmezett required fields – yaml nélkül is érvényes
+    // Default required fields – apply even without a yaml
     private static readonly string[] DefaultRequiredFields =
     [
         "Affected files",
@@ -46,15 +46,15 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
         "Description"
     ];
 
-    // Alapértelmezett task count korlátok
+    // Default task count constraints
     private const int DefaultTaskCountMin = 1;
     private const int DefaultTaskCountMax = 15;
 
-    // Numbered heading pattern: "1." vagy "1. ##" vagy "## 1."
+    // Numbered heading pattern: "1." or "1. ##" or "## 1."
     private static readonly Regex TaskHeadingRegex =
         new(@"^(\d+)\.\s", RegexOptions.Multiline | RegexOptions.Compiled);
 
-    // "Affected files:" sor pattern
+    // "Affected files:" line pattern
     private static readonly Regex AffectedFilesLineRegex =
         new(@"Affected files?:\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
@@ -92,7 +92,7 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
     }
 
     // ─────────────────────────────────────────────
-    // Privát ellenőrzések
+    // Private checks
     // ─────────────────────────────────────────────
 
     private static void CheckTaskCount(
@@ -149,9 +149,9 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
 
             foreach (var forbidden in forbiddenFiles)
             {
-                // Substring match helyett: szóhatár alapú egyezés
-                // "CachingRepository.cs" NEM egyezik "Repository.cs"-re
-                // "Repository.cs" IGEN egyezik "Repository.cs"-re
+                // Word-boundary match instead of a plain substring match:
+                // "CachingRepository.cs" does NOT match "Repository.cs"
+                // "Repository.cs" DOES match "Repository.cs"
                 var pattern = $@"(?<![A-Za-z]){Regex.Escape(forbidden)}";
                 if (Regex.IsMatch(line, pattern, RegexOptions.IgnoreCase))
                     violations.Add(new ValidationViolation(
@@ -224,7 +224,7 @@ public sealed class TaskBreakdownValidator : IStepOutputValidator
     }
 
     /// <summary>
-    /// A kimenet szövegét szétbontja egyedi task blokkokra a numbered heading alapján.
+    /// Splits the output text into individual task blocks based on the numbered heading.
     /// </summary>
     private static IReadOnlyList<string> SplitIntoTasks(string content)
     {

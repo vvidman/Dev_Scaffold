@@ -21,10 +21,10 @@ using Scaffold.Validation.Abstractions;
 namespace Scaffold.Validation;
 
 /// <summary>
-/// Step-specifikus validátorok nyilvántartása és feloldása step_id alapján.
+/// Registry and resolution of step-specific validators by step_id.
 ///
-/// Ha nincs regisztrált validator egy adott step_id-hoz, null-t ad vissza –
-/// ebben az esetben csak az UniversalOutputValidator fut, a step nem esik el.
+/// If no validator is registered for a given step_id, returns null –
+/// in that case only UniversalOutputValidator runs, the step does not fail.
 /// </summary>
 public sealed class StepValidatorRegistry
 {
@@ -36,12 +36,12 @@ public sealed class StepValidatorRegistry
     }
 
     /// <summary>
-    /// Feloldja a step_id-hoz tartozó validátort.
-    /// Ha nincs regisztrált validator, null-t ad vissza.
+    /// Resolves the validator that belongs to the step_id.
+    /// Returns null if no validator is registered.
     /// </summary>
     public IStepOutputValidator? Resolve(string stepId) =>
         _validators.GetValueOrDefault(stepId);
 
-    /// <summary>Regisztrált step_id-ok listája (diagnosztikához).</summary>
+    /// <summary>List of registered step_ids (for diagnostics).</summary>
     public IReadOnlyCollection<string> RegisteredStepIds => _validators.Keys;
 }

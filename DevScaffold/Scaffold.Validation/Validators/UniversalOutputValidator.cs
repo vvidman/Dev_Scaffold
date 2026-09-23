@@ -21,18 +21,18 @@ using Scaffold.Validation.Abstractions;
 namespace Scaffold.Validation.Validators;
 
 /// <summary>
-/// Step-típustól független, minden kimenetere futó ellenőrzések.
+/// Checks that run on every output, independent of step type.
 ///
-/// Szabályok:
-///   EMPTY_OUTPUT           – üres vagy whitespace-only kimenet              (Error)
-///   STOP_TOKEN_LEAKED      – LLM stop token bekerült a fájlba              (Error)
-///   TRUNCATED_OUTPUT       – kimenet mondat/struktúra közepén vágódik el   (Error)
-///   TOKEN_LIMIT_PROXIMITY  – tokensGenerated >= maxTokens * 0.95           (Warning)
+/// Rules:
+///   EMPTY_OUTPUT           – empty or whitespace-only output                (Error)
+///   STOP_TOKEN_LEAKED      – an LLM stop token leaked into the file         (Error)
+///   TRUNCATED_OUTPUT       – output is cut off mid-sentence/mid-structure   (Error)
+///   TOKEN_LIMIT_PROXIMITY  – tokensGenerated >= maxTokens * 0.95            (Warning)
 /// </summary>
 /// <remarks>
-/// Szándékosan nem implementál IOutputValidator-t.
-/// Belső segédosztály – kizárólag a CompositeOutputValidator használja.
-/// DI-ban közvetlenül NEM regisztrálandó.
+/// Deliberately does not implement IOutputValidator.
+/// Internal helper class – used exclusively by CompositeOutputValidator.
+/// Do NOT register directly in DI.
 /// </remarks>
 internal sealed class UniversalOutputValidator
 {
@@ -47,8 +47,8 @@ internal sealed class UniversalOutputValidator
     ];
 
     /// <summary>
-    /// Token limit proximity threshold: ha a generált tokenek száma eléri
-    /// a max_tokens 95%-át, Warning kerül a reportba – még ha nem is truncált.
+    /// Token limit proximity threshold: if the number of generated tokens reaches
+    /// 95% of max_tokens, a Warning is added to the report – even if not truncated.
     /// </summary>
     private const double TokenLimitProximityThreshold = 0.95;
 
@@ -62,7 +62,7 @@ internal sealed class UniversalOutputValidator
         CheckEmptyOutput(outputContent, violations);
 
         if (violations.Count > 0)
-            return violations; // nincs értelme tovább ellenőrizni üres kimeneten
+            return violations; // no point checking further on empty output
 
         CheckStopTokenLeaked(outputContent, violations);
         CheckTruncatedOutput(outputContent, violations);
@@ -79,9 +79,9 @@ internal sealed class UniversalOutputValidator
             violations.Add(new ValidationViolation(
                 RuleId: "EMPTY_OUTPUT",
                 Layer: "Universal",
-                Description: "A kimenet üres vagy csak whitespace karaktereket tartalmaz.",
+                Description: "The output is empty or contains only whitespace characters.",
                 Severity: ViolationSeverity.Error,
-                FixHint: "Az LLM nem generált kimenetet. Ellenőrizd a system promptot és az input összerakást."));
+                FixHint: "The LLM did not generate any output. Check the system prompt and the input assembly."));
     }
 
     private static void CheckStopTokenLeaked(
@@ -96,11 +96,11 @@ internal sealed class UniversalOutputValidator
             violations.Add(new ValidationViolation(
                 RuleId: "STOP_TOKEN_LEAKED",
                 Layer: "Universal",
-                Description: $"Stop token szerepel a kimenetben: '{token}'.",
+                Description: $"Stop token present in the output: '{token}'.",
                 Severity: ViolationSeverity.Error,
-                FixHint: $"A '{token}' stop token bekerült a generált fájlba. "
-                       + "Szűrd ki az InferenceWorkerben a token írás előtt."));
-            return; // elég az első találat
+                FixHint: $"The '{token}' stop token leaked into the generated file. "
+                       + "Filter it out in InferenceWorker before writing the token."));
+            return; // one match is enough
         }
     }
 
@@ -115,7 +115,7 @@ internal sealed class UniversalOutputValidator
         if (lastLine is null)
             return;
 
-        // Truncation jelei: nem teljes mondat (nincs lezáró írásjel vagy markdown elem)
+        // Signs of truncation: not a complete sentence (no closing punctuation or markdown element)
         var endsCorrectly =
             lastLine.EndsWith('.') ||
             lastLine.EndsWith(':') ||
@@ -131,10 +131,10 @@ internal sealed class UniversalOutputValidator
             violations.Add(new ValidationViolation(
                 RuleId: "TRUNCATED_OUTPUT",
                 Layer: "Universal",
-                Description: $"A kimenet csonkítva látszik. Utolsó sor: \"{lastLine[..Math.Min(60, lastLine.Length)]}...\"",
+                Description: $"The output appears truncated. Last line: \"{lastLine[..Math.Min(60, lastLine.Length)]}...\"",
                 Severity: ViolationSeverity.Error,
-                FixHint: "A max_tokens limit elérése miatt a kimenet nem fejeződött be. "
-                       + "Növeld a max_tokens értéket a step agent configban."));
+                FixHint: "The output did not finish because the max_tokens limit was reached. "
+                       + "Increase max_tokens in the step agent config."));
         }
     }
 
@@ -152,10 +152,10 @@ internal sealed class UniversalOutputValidator
             violations.Add(new ValidationViolation(
                 RuleId: "TOKEN_LIMIT_PROXIMITY",
                 Layer: "Universal",
-                Description: $"Generált tokenek ({tokensGenerated}) elérte a max_tokens "
-                           + $"({maxTokensConfigured}) {TokenLimitProximityThreshold:P0}-át. "
-                           + "Truncation kockázat a következő futásokon.",
+                Description: $"Generated tokens ({tokensGenerated}) reached "
+                           + $"{TokenLimitProximityThreshold:P0} of max_tokens ({maxTokensConfigured}). "
+                           + "Truncation risk on subsequent runs.",
                 Severity: ViolationSeverity.Warning,
-                FixHint: $"Fontold meg a max_tokens növelését (jelenlegi: {maxTokensConfigured})."));
+                FixHint: $"Consider increasing max_tokens (currently: {maxTokensConfigured})."));
     }
 }

@@ -195,7 +195,7 @@ as the original working record.
 
 **Prerequisites:** .NET 10 SDK, and either a GGUF model file (e.g. [Qwen2.5-7B-Instruct](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF)) or an OpenAI-compatible API endpoint.
 
-**1. Configure the CLI** — create `Scaffold.CLI.yaml` next to the `DevScaffold` executable:
+**1. Configure the CLI** — copy `Scaffold.CLI.example.yaml` to `Scaffold.CLI.yaml` next to the `DevScaffold` executable and adjust the paths (the real file is git-ignored – it holds machine-specific paths):
 
 ```yaml
 host_binary_path: ./bin/Scaffold.ServiceHost

@@ -171,7 +171,8 @@ public class InferenceWorker : IInferenceWorker
             finally
             {
                 // Stop the heartbeat before any terminal event is published,
-                // on success, failure and cancellation alike.
+                // on success, failure and cancellation alike. RunProgressTimerAsync
+                // never throws, so awaiting it cannot mask the inference outcome.
                 progressTimer.Dispose();
                 await progressTask;
             }
@@ -207,6 +208,7 @@ public class InferenceWorker : IInferenceWorker
     /// <summary>
     /// Sends an InferenceProgressEvent on every tick until the timer is disposed.
     /// Every tick publishes – the event doubles as the liveness heartbeat.
+    /// Never throws – heartbeat failures are logged and end the loop.
     /// </summary>
     private async Task RunProgressTimerAsync(
         InferRequest request,
@@ -227,6 +229,15 @@ public class InferenceWorker : IInferenceWorker
             }
         }
         catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            // The heartbeat is a side channel: a failure here (typically a broken
+            // event pipe) must never change the outcome of the inference itself.
+            // Stop sending heartbeats; the inference continues and reports its own
+            // terminal event (which will fail the same way if the pipe is gone).
+            Console.Error.WriteLine(
+                $"[ServiceHost WARN] Heartbeat stopped for {request.RequestId}: {ex.Message}");
+        }
     }
 
     private static string BuildStatusMessage(string modelAlias, CountingTextWriter? writer, double elapsed)

@@ -135,4 +135,78 @@ public sealed class InferenceWorkerHeartbeatTests
         await publisher.Received(1).PublishInferenceCompletedAsync(
             Arg.Is("heartbeat-request"), Arg.Is("coding"), Arg.Any<string>(), Arg.Any<uint>(), Arg.Is(1u), Arg.Any<CancellationToken>());
     }
+
+    /// <summary>
+    /// Publisher whose heartbeat always fails (e.g. broken event pipe);
+    /// <paramref name="heartbeatFailed"/> completes on the first failed publish.
+    /// </summary>
+    private static IInferenceEventPublisher CreateFailingHeartbeatPublisher(TaskCompletionSource heartbeatFailed)
+    {
+        var publisher = Substitute.For<IInferenceEventPublisher>();
+        publisher
+            .PublishInferenceProgressAsync(default!, default!, default, default!, default)
+            .ReturnsForAnyArgs(_ =>
+            {
+                heartbeatFailed.TrySetResult();
+                return Task.FromException(new IOException("pipe gone"));
+            });
+        return publisher;
+    }
+
+    [TestMethod]
+    public async Task RunAsync_HeartbeatPublishFails_InferenceStillCompletes()
+    {
+        var heartbeatFailed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = CreateFailingHeartbeatPublisher(heartbeatFailed);
+
+        var backend = Substitute.For<IInferenceBackend>();
+        backend.RunAsync(Arg.Any<InferRequest>(), Arg.Any<TextWriter>(), Arg.Any<CancellationToken>())
+            .Returns(async ci =>
+            {
+                // Keep generating for a few intervals after the heartbeat has broken.
+                await heartbeatFailed.Task.WaitAsync(WaitTimeout);
+                await Task.Delay(ProgressInterval * 3);
+                await ci.ArgAt<TextWriter>(1).WriteAsync("token");
+                return 1u;
+            });
+
+        var provider = Substitute.For<IInferenceBackendProvider>();
+        provider.GetOrLoadAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(backend);
+
+        var worker = new InferenceWorker(provider, publisher, _outputFolder, ProgressInterval);
+        await worker.RunAsync(CreateRequest()).WaitAsync(WaitTimeout);
+
+        await publisher.Received(1).PublishInferenceCompletedAsync(
+            Arg.Is("heartbeat-request"), Arg.Is("coding"), Arg.Any<string>(), Arg.Any<uint>(), Arg.Is(1u), Arg.Any<CancellationToken>());
+        await publisher.DidNotReceiveWithAnyArgs().PublishInferenceFailedAsync(
+            default!, default!, default!, default);
+    }
+
+    [TestMethod]
+    public async Task RunAsync_HeartbeatPublishFailsAndBackendThrows_FailureCarriesBackendMessage()
+    {
+        var heartbeatFailed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var publisher = CreateFailingHeartbeatPublisher(heartbeatFailed);
+
+        var backend = Substitute.For<IInferenceBackend>();
+        backend.RunAsync(Arg.Any<InferRequest>(), Arg.Any<TextWriter>(), Arg.Any<CancellationToken>())
+            .Returns<Task<uint>>(async _ =>
+            {
+                await heartbeatFailed.Task.WaitAsync(WaitTimeout);
+                throw new InvalidOperationException("backend error");
+            });
+
+        var provider = Substitute.For<IInferenceBackendProvider>();
+        provider.GetOrLoadAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(backend);
+
+        var worker = new InferenceWorker(provider, publisher, _outputFolder, ProgressInterval);
+        await worker.RunAsync(CreateRequest()).WaitAsync(WaitTimeout);
+
+        await publisher.Received(1).PublishInferenceFailedAsync(
+            Arg.Is("heartbeat-request"), Arg.Is("coding"), Arg.Is("backend error"), Arg.Any<CancellationToken>());
+        await publisher.DidNotReceiveWithAnyArgs().PublishInferenceCompletedAsync(
+            default!, default!, default!, default, default, default);
+    }
 }

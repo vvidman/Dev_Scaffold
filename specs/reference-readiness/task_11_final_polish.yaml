@@ -1,0 +1,81 @@
+task_id: "11"
+title: "Utolsó simítások — heartbeat hibatűrés, liveness tesztek időzítési tartaléka, Getting Started"
+depends_on: ["10"]
+
+description: |
+  A task_10 utáni átnézés (a177942) három apró pontja.
+
+  1. A heartbeat hibája elfedheti az inference eredményét.
+     A RunProgressTimerAsync csak az OperationCanceledException-t nyeli el.
+     Ha a PublishInferenceProgressAsync más kivételt dob (pl. IOException, mert a CLI
+     lekapcsolódott és az event pipe megszakadt), a progressTask hibás állapotba kerül,
+     és az ExecuteInferenceAsync finally ágában lévő `await progressTask`:
+       - sikeres generálás után hibává fordítja a kérést (InferenceCompleted helyett
+         InferenceFailed próbálkozás), vagy
+       - backend hiba esetén felülírja az eredeti kivételt, így rossz üzenet kerül
+         az InferenceFailedEvent-be.
+     A heartbeat mellékes jelzés; a hibája soha nem befolyásolhatja az inference kimenetelét.
+
+  2. A liveness tesztek 300 ms-os timeouttal és 100 ms-os Task.Delay lépésekkel futnak.
+     Terhelt Windows CI runneren (≈15 ms timer felbontás, thread pool késés) ez
+     alkalmanként elbukhat. A tűrést növeljük, a tesztek logikája nem változik.
+
+  3. A README Getting Started még "create Scaffold.CLI.yaml"-t mond, pedig a task_01
+     óta a Scaffold.CLI.example.yaml a kiindulópont.
+
+files_to_modify:
+  - path: DevScaffold/Scaffold.ServiceHost/InferenceWorker.cs
+    change: |
+      A RunProgressTimerAsync-ben a meglévő OCE ág mellé:
+
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            // The heartbeat is a side channel: a failure here (typically a broken
+            // event pipe) must never change the outcome of the inference itself.
+            // Stop sending heartbeats; the inference continues and reports its own
+            // terminal event (which will fail the same way if the pipe is gone).
+            Console.Error.WriteLine(
+                $"[ServiceHost WARN] Heartbeat stopped for {request.RequestId}: {ex.Message}");
+        }
+
+      A metódus XML kommentjét egészítsd ki: "Never throws – heartbeat failures are logged and end the loop."
+      A finally ágban az `await progressTask` így sosem dob; kommentben jelezd ezt.
+
+  - path: DevScaffold/Scaffold.ServiceHost.Tests/InferenceWorkerHeartbeatTests.cs
+    change: |
+      Új regressziós teszt:
+        RunAsync_HeartbeatPublishFails_InferenceStillCompletes
+          - PublishInferenceProgressAsync → ThrowsAsync(new IOException("pipe gone"))
+          - a backend néhány intervallumig fut (Task.Delay(ProgressInterval * 3)), majd tokeneket ír és visszatér
+          - elvárás: PublishInferenceCompletedAsync Received(1) a request_id-val,
+                     PublishInferenceFailedAsync DidNotReceive()
+      Opcionálisan a párja:
+        RunAsync_HeartbeatPublishFailsAndBackendThrows_FailureCarriesBackendMessage
+          - backend InvalidOperationException("backend error")
+          - elvárás: PublishInferenceFailedAsync az "backend error" üzenettel (nem "pipe gone")
+
+  - path: DevScaffold/Scaffold.Tests/Application/InferenceResultHandlerLivenessTests.cs
+    change: |
+      - LivenessTimeout: 300 ms → 1 s
+      - HandleAsync_ProgressEventsKeepArriving_DoesNotTimeOut: a ciklus fedje le a
+        timeout legalább másfélszeresét (pl. 15 × 100 ms = 1,5 s); frissítsd a kommentet.
+      - A többi teszt a LivenessTimeout-ból számol (pl. LivenessTimeout * 2) — ellenőrizd,
+        hogy nincs más hardkódolt, a 300 ms-hoz kötött érték.
+      - A TestTimeout (10 s) maradhat.
+
+  - path: README.md
+    change: |
+      Getting Started, 1. lépés:
+        "**1. Configure the CLI** — create `Scaffold.CLI.yaml` next to the `DevScaffold` executable:"
+      helyett:
+        "**1. Configure the CLI** — copy `Scaffold.CLI.example.yaml` to `Scaffold.CLI.yaml` next to the
+         `DevScaffold` executable and adjust the paths (the real file is git-ignored – it holds machine-specific paths):"
+      A példa yaml blokk maradhat.
+
+acceptance_criteria:
+  - "A RunProgressTimerAsync semmilyen kivételt nem enged ki; a hibát stderr-re naplózza és leáll"
+  - "Ha a heartbeat publikálása hibát dob, egy egyébként sikeres inference InferenceCompletedEvent-tel zárul (új teszt zöld)"
+  - "A liveness tesztek 1 s-os timeouttal futnak, és a folyamatos aktivitás teszt a timeout legalább 1,5-szeresét fedi le"
+  - "A README Getting Started a Scaffold.CLI.example.yaml másolását írja le"
+  - "dotnet build -c Release 0 warninggal; a CI mindkét OS-en zöld"

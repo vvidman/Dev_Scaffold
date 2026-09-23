@@ -34,7 +34,7 @@ namespace Scaffold.Tests.Application;
 public sealed class InferenceResultHandlerLivenessTests
 {
     private const string RequestId = "req-1";
-    private static readonly TimeSpan LivenessTimeout = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan LivenessTimeout = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(10);
 
     private IPipeClient _pipeClient = null!;
@@ -104,8 +104,8 @@ public sealed class InferenceResultHandlerLivenessTests
     {
         var handleTask = StartHandle();
 
-        // 6 × 100 ms = 600 ms of activity, twice the liveness timeout.
-        for (var i = 0; i < 6; i++)
+        // 15 × 100 ms = 1.5 s of activity, 1.5× the liveness timeout.
+        for (var i = 0; i < 15; i++)
         {
             await Task.Delay(100);
             await Raise(Progress(RequestId));

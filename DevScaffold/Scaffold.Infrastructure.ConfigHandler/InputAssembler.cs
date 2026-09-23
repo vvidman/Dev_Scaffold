@@ -23,14 +23,13 @@ using YamlDotNet.RepresentationModel;
 namespace Scaffold.Infrastructure.ConfigHandler;
 
 /// <summary>
-/// Input YAML fájl összeszereléséért felelős implementáció.
+/// Implementation responsible for assembling the input YAML file.
 ///
-/// Beolvassa az input yaml-t, megkeresi az összes path referenciát,
-/// ellenőrzi hogy léteznek-e (fail fast), majd összeállít egy
-/// teljes kontextus stringet az AI számára.
+/// Reads the input yaml, finds all path references, checks that they
+/// exist (fail fast), then assembles a full context string for the AI.
 ///
-/// Path referenciának számít minden olyan mező aminek neve
-/// "path"-ra végződik a YAML struktúrában.
+/// A path reference is any field whose name ends in "path"
+/// within the YAML structure.
 /// </summary>
 public class InputAssembler : IInputAssembler
 {
@@ -38,12 +37,12 @@ public class InputAssembler : IInputAssembler
     {
         if (!File.Exists(inputYamlPath))
             throw new FileNotFoundException(
-                $"Input fájl nem található: {inputYamlPath}");
+                $"Input file not found: {inputYamlPath}");
 
         var yaml = File.ReadAllText(inputYamlPath);
         var baseDir = Path.GetDirectoryName(Path.GetFullPath(inputYamlPath)) ?? ".";
 
-        ValidatePathReferences(yaml, baseDir, stepId);  // inputYamlPath helyett stepId
+        ValidatePathReferences(yaml, baseDir, stepId);  // stepId instead of inputYamlPath
         var primaryContext = BuildContext(yaml, baseDir);
 
         if (string.IsNullOrEmpty(secondaryInputYamlPath))
@@ -51,7 +50,7 @@ public class InputAssembler : IInputAssembler
 
         if (!File.Exists(secondaryInputYamlPath))
             throw new FileNotFoundException(
-                $"Secondary input fájl nem található: {secondaryInputYamlPath}");
+                $"Secondary input file not found: {secondaryInputYamlPath}");
 
         var secondaryYaml = File.ReadAllText(secondaryInputYamlPath);
         var secondaryBaseDir = Path.GetDirectoryName(Path.GetFullPath(secondaryInputYamlPath)) ?? ".";
@@ -63,8 +62,8 @@ public class InputAssembler : IInputAssembler
     }
 
     /// <summary>
-    /// Végigolvassa a YAML-t, megkeresi az összes path referenciát,
-    /// és ellenőrzi hogy a fájlok léteznek-e.
+    /// Reads through the YAML, finds all path references,
+    /// and checks that the files exist.
     /// </summary>
     private static void ValidatePathReferences(string yaml, string baseDir, string stepId)
     {
@@ -89,7 +88,7 @@ public class InputAssembler : IInputAssembler
     }
 
     /// <summary>
-    /// Összegyűjti az összes "path" kulcsú mezőt a YAML-ből rekurzívan.
+    /// Recursively collects every field whose key ends in "path" from the YAML.
     /// </summary>
     private static IEnumerable<(string FieldPath, string Value)> CollectPathFields(
         YamlNode node,
@@ -131,8 +130,8 @@ public class InputAssembler : IInputAssembler
     }
 
     /// <summary>
-    /// Összeállítja az AI-nak átadott teljes kontextust.
-    /// Az input YAML-t megtartja, a path referenciák tartalmát inline bővíti.
+    /// Assembles the full context handed to the AI.
+    /// Keeps the input YAML, inlining the content of the path references.
     /// </summary>
     private static string BuildContext(string yaml, string baseDir)
     {
@@ -152,7 +151,7 @@ public class InputAssembler : IInputAssembler
             var extension = Path.GetExtension(fullPath).TrimStart('.');
 
             fileContents.Add($"""
-                ## Fájl tartalma: {pathValue}
+                ## File content: {pathValue}
                 ```{extension}
                 {content}
                 ```
@@ -160,7 +159,7 @@ public class InputAssembler : IInputAssembler
         }
 
         var builder = new System.Text.StringBuilder();
-        builder.AppendLine("## Input konfiguráció");
+        builder.AppendLine("## Input configuration");
         builder.AppendLine("```yaml");
         builder.AppendLine(yaml);
         builder.AppendLine("```");
@@ -168,7 +167,7 @@ public class InputAssembler : IInputAssembler
         if (fileContents.Count > 0)
         {
             builder.AppendLine();
-            builder.AppendLine("## Hivatkozott fájlok");
+            builder.AppendLine("## Referenced files");
             foreach (var fc in fileContents)
             {
                 builder.AppendLine(fc);

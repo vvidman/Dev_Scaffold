@@ -24,7 +24,7 @@ using YamlDotNet.Serialization.NamingConventions;
 namespace Scaffold.Infrastructure.ConfigHandler;
 
 /// <summary>
-/// YAML alapú modell registry olvasó.
+/// YAML-based model registry reader.
 /// </summary>
 public class YamlModelRegistryReader : IModelRegistryReader
 {
@@ -42,7 +42,7 @@ public class YamlModelRegistryReader : IModelRegistryReader
     {
         if (!File.Exists(yamlPath))
             throw new FileNotFoundException(
-                $"Modell registry nem található: {yamlPath}");
+                $"Model registry not found: {yamlPath}");
 
         var yaml = File.ReadAllText(yamlPath);
         return _deserializer.Deserialize<ModelRegistryConfig>(yaml);

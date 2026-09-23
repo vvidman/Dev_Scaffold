@@ -23,7 +23,7 @@ using YamlDotNet.Serialization.NamingConventions;
 namespace Scaffold.Infrastructure.ConfigHandler;
 
 /// <summary>
-/// Betölti és validálja a Scaffold.CLI.yaml projekt-szintű konfigurációt.
+/// Loads and validates the project-level Scaffold.CLI.yaml configuration.
 /// </summary>
 public sealed class YamlCliProjectConfigReader
 {
@@ -33,16 +33,16 @@ public sealed class YamlCliProjectConfigReader
         .Build();
 
     /// <summary>
-    /// Betölti a megadott útvonalú yaml fájlt.
+    /// Loads the yaml file at the given path.
     /// </summary>
-    /// <exception cref="FileNotFoundException">Ha a fájl nem létezik.</exception>
-    /// <exception cref="InvalidOperationException">Ha a yaml nem értelmezhető.</exception>
+    /// <exception cref="FileNotFoundException">If the file does not exist.</exception>
+    /// <exception cref="InvalidOperationException">If the yaml cannot be parsed.</exception>
     public CliProjectConfig Load(string path)
     {
         if (!File.Exists(path))
             throw new FileNotFoundException(
-                $"CLI konfiguráció nem található: {path}\n" +
-                $"Hozd létre a fájlt az exe mellett: {Path.GetFileName(path)}");
+                $"CLI configuration not found: {path}\n" +
+                $"Create the file next to the exe: {Path.GetFileName(path)}");
 
         try
         {
@@ -52,56 +52,56 @@ public sealed class YamlCliProjectConfigReader
         catch (Exception ex) when (ex is not FileNotFoundException)
         {
             throw new InvalidOperationException(
-                $"CLI konfiguráció parse hiba ({Path.GetFileName(path)}): {ex.Message}", ex);
+                $"CLI configuration parse error ({Path.GetFileName(path)}): {ex.Message}", ex);
         }
     }
 
     /// <summary>
-    /// Validálja a betöltött config tartalmát a megadott step kontextusában.
+    /// Validates the loaded config's content in the context of the given step.
     /// </summary>
-    /// <exception cref="InvalidOperationException">Ha kötelező mező hiányzik vagy a step ismeretlen.</exception>
+    /// <exception cref="InvalidOperationException">If a required field is missing or the step is unknown.</exception>
     public void Validate(CliProjectConfig config, string stepName)
     {
         var errors = new List<string>();
 
-        // Globális mezők
+        // Global fields
         if (string.IsNullOrWhiteSpace(config.HostBinaryPath))
-            errors.Add("host_binary_path hiányzik");
+            errors.Add("host_binary_path is missing");
 
         if (string.IsNullOrWhiteSpace(config.Models))
-            errors.Add("models hiányzik");
+            errors.Add("models is missing");
 
         if (string.IsNullOrWhiteSpace(config.PipeName))
-            errors.Add("pipe_name hiányzik");
+            errors.Add("pipe_name is missing");
 
         if (string.IsNullOrWhiteSpace(config.ProjectContext))
-            errors.Add("project_context hiányzik");
+            errors.Add("project_context is missing");
         else if (!File.Exists(config.ProjectContext))
-            errors.Add($"project_context fájl nem található: {config.ProjectContext}");
+            errors.Add($"project_context file not found: {config.ProjectContext}");
 
-        // Step-specifikus validáció
+        // Step-specific validation
         if (!config.Steps.TryGetValue(stepName, out var step))
         {
             var available = config.Steps.Count > 0
                 ? string.Join(", ", config.Steps.Keys)
-                : "(nincsenek steps definiálva)";
+                : "(no steps defined)";
 
-            errors.Add($"Ismeretlen step: '{stepName}'. Elérhető stepek: {available}");
+            errors.Add($"Unknown step: '{stepName}'. Available steps: {available}");
         }
         else
         {
             if (string.IsNullOrWhiteSpace(step.InputConfig))
-                errors.Add($"steps.{stepName}.input_config hiányzik");
+                errors.Add($"steps.{stepName}.input_config is missing");
 
             if (string.IsNullOrWhiteSpace(step.ModelAlias))
-                errors.Add($"steps.{stepName}.model_alias hiányzik");
+                errors.Add($"steps.{stepName}.model_alias is missing");
 
             if (!string.IsNullOrWhiteSpace(step.InputConfig) && !File.Exists(step.InputConfig))
-                errors.Add($"steps.{stepName}.input_config fájl nem található: {step.InputConfig}");
+                errors.Add($"steps.{stepName}.input_config file not found: {step.InputConfig}");
         }
 
         if (errors.Count > 0)
             throw new InvalidOperationException(
-                $"CLI konfiguráció hibák:\n  - {string.Join("\n  - ", errors)}");
+                $"CLI configuration errors:\n  - {string.Join("\n  - ", errors)}");
     }
 }

@@ -24,7 +24,7 @@ using YamlDotNet.Serialization.NamingConventions;
 namespace Scaffold.Infrastructure.ConfigHandler;
 
 /// <summary>
-/// YAML alapú agent step konfiguráció olvasó.
+/// YAML-based agent step configuration reader.
 /// </summary>
 public class YamlStepAgentConfigReader : IStepAgentConfigReader
 {
@@ -38,15 +38,15 @@ public class YamlStepAgentConfigReader : IStepAgentConfigReader
             .Build();
     }
 
-    // Új opcionális mezők (pl. FilepathHintPrefix) nem igényelnek módosítást itt.
-    // Az UnderscoredNamingConvention automatikusan leképezi a snake_case YAML kulcsokat
-    // PascalCase property-kre, az IgnoreUnmatchedProperties pedig biztosítja, hogy
-    // hiányzó mezők ne okozzanak hibát. Ez tudatos, explicit tervezési döntés.
+    // New optional fields (e.g. FilepathHintPrefix) do not require changes here.
+    // UnderscoredNamingConvention automatically maps snake_case YAML keys to
+    // PascalCase properties, and IgnoreUnmatchedProperties ensures that
+    // missing fields do not cause an error. This is a deliberate, explicit design choice.
     public StepAgentConfig Load(string yamlPath)
     {
         if (!File.Exists(yamlPath))
             throw new FileNotFoundException(
-                $"Agent konfiguráció nem található: {yamlPath}");
+                $"Agent configuration not found: {yamlPath}");
 
         var yaml = File.ReadAllText(yamlPath);
         var config = _deserializer.Deserialize<StepAgentConfig>(yaml);
@@ -58,14 +58,14 @@ public class YamlStepAgentConfigReader : IStepAgentConfigReader
     {
         if (string.IsNullOrWhiteSpace(config.Step))
             throw new InvalidOperationException(
-                $"A step agent config 'step' mezője kötelező: {path}");
+                $"The step agent config's 'step' field is required: {path}");
 
         if (string.IsNullOrWhiteSpace(config.SystemPrompt))
             throw new InvalidOperationException(
-                $"A step agent config 'system_prompt' mezője kötelező: {path}");
+                $"The step agent config's 'system_prompt' field is required: {path}");
 
         if (config.MaxTokens.HasValue && config.MaxTokens.Value <= 0)
             throw new InvalidOperationException(
-                $"A 'max_tokens' értékének pozitívnak kell lennie: {path}");
+                $"'max_tokens' must be a positive value: {path}");
     }
 }

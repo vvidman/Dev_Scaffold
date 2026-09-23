@@ -24,19 +24,19 @@ using System.IO.Pipes;
 namespace Scaffold.CLI;
 
 /// <summary>
-/// Named Pipe kliens a CLI oldalán.
+/// Named Pipe client on the CLI side.
 ///
-/// Felelőssége:
-/// - Command pipe-ra CommandEnvelope küldés (CLI → ServiceHost)
-/// - Event pipe-ról EventEnvelope olvasás (ServiceHost → CLI)
+/// Responsibilities:
+/// - Sending CommandEnvelopes on the command pipe (CLI → ServiceHost)
+/// - Reading EventEnvelopes from the event pipe (ServiceHost → CLI)
 ///
-/// Csatlakozási sorrend (ADR #8):
-///   1. ConnectAsync     – event pipe csatlakozás
-///   2. WaitForReadyAsync – ServiceReadyEvent közvetlen olvasás (loop nélkül)
-///   3. StartAsync       – event loop indítás + command pipe csatlakozás
+/// Connection order (ADR #8):
+///   1. ConnectAsync      – connect to the event pipe
+///   2. WaitForReadyAsync – read ServiceReadyEvent directly (no loop yet)
+///   3. StartAsync        – start the event loop + connect to the command pipe
 ///
-/// Ez a sorrend garantálja hogy a ServiceReadyEvent nem vész el az
-/// event loop és a WaitForReadyAsync közötti versenyhelyzetben.
+/// This order guarantees that ServiceReadyEvent cannot be lost in a
+/// race between the event loop and WaitForReadyAsync.
 /// </summary>
 public class PipeClient : IPipeClient, IAsyncDisposable
 {
@@ -50,7 +50,7 @@ public class PipeClient : IPipeClient, IAsyncDisposable
 
     private bool _disposed;
 
-    // Esemény callback – minden beérkező EventEnvelope-hoz meghívódik
+    // Event callback – invoked for every incoming EventEnvelope
     public event Func<EventEnvelope, Task>? EventReceived;
 
     public PipeClient(string pipeName)
@@ -59,9 +59,9 @@ public class PipeClient : IPipeClient, IAsyncDisposable
     }
 
     /// <summary>
-    /// 1. lépés: Csatlakozik az event pipe-ra.
-    /// A ServiceHost ezen küldi a ServiceReadyEvent-et.
-    /// Command pipe és event loop még NEM indul – azok a StartAsync feladata.
+    /// Step 1: Connects to the event pipe.
+    /// The ServiceHost sends ServiceReadyEvent on this.
+    /// The command pipe and event loop do NOT start yet – that is StartAsync's job.
     /// </summary>
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
@@ -75,36 +75,36 @@ public class PipeClient : IPipeClient, IAsyncDisposable
     }
 
     /// <summary>
-    /// 2. lépés: Megvárja az első ServiceReadyEvent-et az event pipe-on.
-    /// Közvetlenül olvassa a pipe-ot – az event loop még nem fut.
+    /// Step 2: Waits for the first ServiceReadyEvent on the event pipe.
+    /// Reads the pipe directly – the event loop is not running yet.
     ///
-    /// A timeout lejáratakor a pipe-ot zárja le, amivel megszakítja
-    /// a blokkoló ParseDelimitedFrom hívást.
+    /// When the timeout expires, closes the pipe, which interrupts
+    /// the blocking ParseDelimitedFrom call.
     /// </summary>
-    /// <returns>true ha megérkezett a ready jel, false ha timeout vagy hiba</returns>
+    /// <returns>true if the ready signal arrived, false on timeout or error</returns>
     public async Task<bool> WaitForReadyAsync(
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
         if (_eventPipe is null)
             throw new InvalidOperationException(
-                "Event pipe nincs csatlakoztatva. Hívj ConnectAsync-t először.");
+                "Event pipe is not connected. Call ConnectAsync first.");
 
         using var timeoutCts = new CancellationTokenSource(timeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             timeoutCts.Token);
 
-        // ParseDelimitedFrom szinkron blokkoló – a pipe lezárásával szakítható meg
+        // ParseDelimitedFrom is a blocking sync call – interrupted by closing the pipe
         using var reg = linkedCts.Token.Register(() =>
         {
             try { _eventPipe.Dispose(); }
-            catch { /* Dispose hiba – normál eset timeout alatt */ }
+            catch { /* Dispose error – expected during a timeout */ }
         });
 
         try
         {
-            // Task.Run – nem blokkoljuk az async szálat
+            // Task.Run – so we don't block the async thread
             var envelope = await Task.Run(
                 () => EventEnvelope.Parser.ParseDelimitedFrom(_eventPipe));
 
@@ -116,18 +116,18 @@ public class PipeClient : IPipeClient, IAsyncDisposable
     }
 
     /// <summary>
-    /// 3. lépés: Event loop indítása és command pipe csatlakozás.
-    /// WaitForReadyAsync sikeres visszatérése után hívandó.
+    /// Step 3: Starts the event loop and connects to the command pipe.
+    /// Call this after WaitForReadyAsync returns successfully.
     /// </summary>
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        // Event loop indítása – ettől kezdve az EventReceived callback-ek tüzelnek
+        // Starting the event loop – EventReceived callbacks fire from now on
         _eventLoopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _eventLoopTask = Task.Run(
             () => RunEventLoopAsync(_eventLoopCts.Token),
             _eventLoopCts.Token);
 
-        // Command pipe csatlakozás – a ServiceHost az event loop indulása után nyitja meg
+        // Connecting to the command pipe – the ServiceHost opens it after the event loop starts
         _commandPipe = new NamedPipeClientStream(
             serverName: ".",
             pipeName: $"{_pipeName}-commands",
@@ -138,8 +138,8 @@ public class PipeClient : IPipeClient, IAsyncDisposable
     }
 
     /// <summary>
-    /// CommandEnvelope küldése a ServiceHost-nak.
-    /// StartAsync után hívható.
+    /// Sends a CommandEnvelope to the ServiceHost.
+    /// Can be called after StartAsync.
     /// </summary>
     public async Task SendAsync(
         CommandEnvelope envelope,
@@ -149,9 +149,9 @@ public class PipeClient : IPipeClient, IAsyncDisposable
 
         if (_commandPipe is null || !_commandPipe.IsConnected)
             throw new InvalidOperationException(
-                "Command pipe nincs csatlakoztatva. Hívj StartAsync-t először.");
+                "Command pipe is not connected. Call StartAsync first.");
 
-        // WriteDelimitedTo – varint hossz prefix + protobuf bináris adat
+        // WriteDelimitedTo – varint length prefix + protobuf binary data
         envelope.WriteDelimitedTo(_commandPipe);
         await _commandPipe.FlushAsync(cancellationToken);
     }
@@ -170,20 +170,20 @@ public class PipeClient : IPipeClient, IAsyncDisposable
 
                 try
                 {
-                    // ParseDelimitedFrom blokkol amíg üzenet nem érkezik
+                    // ParseDelimitedFrom blocks until a message arrives
                     envelope = EventEnvelope.Parser.ParseDelimitedFrom(_eventPipe);
                 }
                 catch (InvalidProtocolBufferException ipbe)
                 {
-                    Console.Error.WriteLine($"[CLI] Event parse hiba: {ipbe.Message}");
+                    Console.Error.WriteLine($"[CLI] Event parse error: {ipbe.Message}");
                     continue;
                 }
                 catch (IOException ioe)
                 {
                     if (ioe is EndOfStreamException)
-                        Console.WriteLine("[CLI] Event pipe: stream vége. ServiceHost leállt.");
+                        Console.WriteLine("[CLI] Event pipe: end of stream. ServiceHost stopped.");
                     else
-                        Console.WriteLine("[CLI] Event pipe lezárult.");
+                        Console.WriteLine("[CLI] Event pipe closed.");
                     break;
                 }
                 catch (ObjectDisposedException)
@@ -199,14 +199,14 @@ public class PipeClient : IPipeClient, IAsyncDisposable
                     }
                     catch (Exception ex)
                     {
-                        Console.Error.WriteLine($"[CLI] Event callback hiba: {ex.Message}");
+                        Console.Error.WriteLine($"[CLI] Event callback error: {ex.Message}");
                     }
                 }
             }
         }
         catch (OperationCanceledException)
         {
-            // Normál leállás
+            // Normal shutdown
         }
     }
 
@@ -215,30 +215,30 @@ public class PipeClient : IPipeClient, IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
-        // 1. CTS cancel – jelzi az event loop-nak hogy le kell állni
+        // 1. Cancel the CTS – signals the event loop that it must stop
         if (_eventLoopCts is not null)
         {
             await _eventLoopCts.CancelAsync();
             _eventLoopCts.Dispose();
         }
 
-        // 2. Pipe lezárás – feloldja a blokkoló ParseDelimitedFrom hívást.
-        //    FONTOS: ez az await _eventLoopTask ELŐTT kell, különben
-        //    az event loop soha nem tér vissza (ParseDelimitedFrom blokkol).
+        // 2. Close the pipe – unblocks the blocking ParseDelimitedFrom call.
+        //    IMPORTANT: this must happen BEFORE await _eventLoopTask, otherwise
+        //    the event loop never returns (ParseDelimitedFrom blocks).
         if (_eventPipe is not null)
         {
             try { await _eventPipe.DisposeAsync(); }
-            catch (ObjectDisposedException) { /* WaitForReadyAsync timeout már lezárta */ }
+            catch (ObjectDisposedException) { /* already closed by a WaitForReadyAsync timeout */ }
         }
 
-        // 3. Event loop megvárása – a pipe lezárása már feloldotta
+        // 3. Wait for the event loop – closing the pipe already unblocked it
         if (_eventLoopTask is not null)
         {
             try { await _eventLoopTask; }
             catch (OperationCanceledException) { }
         }
 
-        // 4. Command pipe lezárás
+        // 4. Close the command pipe
         if (_commandPipe is not null)
             await _commandPipe.DisposeAsync();
     }

@@ -22,11 +22,11 @@ using System.Diagnostics;
 namespace Scaffold.CLI;
 
 /// <summary>
-/// Az operációs rendszer alapértelmezett szövegszerkesztőjét használja.
+/// Uses the operating system's default text editor.
 ///
-/// UseShellExecute = true: az OS dönti el melyik alkalmazás nyitja meg
-/// a fájlt a kiterjesztés alapján – Windows, macOS és Linux alatt egyaránt működik.
-/// Nem blokkoló: az editor folyamat aszinkron indul, a CLI várakozás nélkül folytatódik.
+/// UseShellExecute = true: the OS decides which application opens the
+/// file based on its extension – works on Windows, macOS and Linux alike.
+/// Non-blocking: the editor process starts asynchronously, the CLI continues without waiting.
 /// </summary>
 public sealed class DefaultFileEditorLauncher : IFileEditorLauncher
 {

@@ -21,13 +21,13 @@ using Scaffold.Application.Interfaces;
 namespace Scaffold.CLI;
 
 /// <summary>
-/// Konzol alapú kimenet implementáció színkódolással.
+/// Console-based output implementation with colour coding.
 ///
-/// Szint → szín mapping:
-///   CLI        → Cyan   (infrastruktúra, pipe, ServiceHost indítás)
-///   Session    → Gray   (inference progress, ServiceHost események)
-///   Validation → Yellow (human validációs interakció)
-///   Error      → Red    (hibák, stderr)
+/// Level → colour mapping:
+///   CLI        → Cyan   (infrastructure, pipe, ServiceHost startup)
+///   Session    → Gray   (inference progress, ServiceHost events)
+///   Validation → Yellow (human validation interaction)
+///   Error      → Red    (errors, stderr)
 /// </summary>
 public sealed class ConsoleScaffoldConsole : IScaffoldConsole
 {

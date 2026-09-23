@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────
+# Scaffold.CLI.example.yaml – project-level CLI configuration (example)
+#
+# Copy this file to Scaffold.CLI.yaml next to the DevScaffold executable
+# and adjust the paths. Scaffold.CLI.yaml is git-ignored on purpose:
+# it contains machine-specific paths.
+# ─────────────────────────────────────────────
+
+# Path to the ServiceHost binary (relative to the CLI executable, or absolute).
+host_binary_path: ./Scaffold.ServiceHost
+
+# Model registry: maps model aliases to GGUF files or OpenAI-compatible endpoints.
+models: ./models.yaml
+
+# Named Pipe identifier – also used as the project name.
+# Spaces are allowed; they become "_" in the output folder name.
+pipe_name: MyProject
+
+# Output root. Structure: {output}/{pipe_name}/{step_name}_{generation}/
+output: ./output
+
+# Main project context – the base input of every step.
+project_context: ./inputs/input.yaml
+
+# Target project root for --apply. Required only when using --apply.
+# project_root: ../MyActualProject/
+
+# ─────────────────────────────────────────────
+# Step definitions
+# Each key is a step name – pass it to --step, e.g. "DevScaffold --step task_breakdown"
+# ─────────────────────────────────────────────
+steps:
+  task_breakdown:
+    input_config:     ./inputs/task_breakdown_agent.yaml
+    validator_config: ./inputs/task_breakdown_validator.yaml   # optional
+    model_alias:      local-reasoning
+
+  coding:
+    input_config: ./inputs/coding_agent.yaml
+    model_alias:  local-coder

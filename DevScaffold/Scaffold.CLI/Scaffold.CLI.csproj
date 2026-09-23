@@ -4,6 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <OutputType>Exe</OutputType>
+    <AssemblyName>DevScaffold</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Scaffold.Agent.Protocol\Scaffold.Agent.Protocol.csproj" />
@@ -16,6 +17,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Update="Scaffold.CLI.yaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Scaffold.CLI.example.yaml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

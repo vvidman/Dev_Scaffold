@@ -22,29 +22,30 @@ using Scaffold.Application.Interfaces;
 namespace Scaffold.CLI;
 
 /// <summary>
-/// Fájl alapú audit logger implementáció.
+/// File-based audit logger implementation.
 ///
-/// Az audit.log fájlba ír, AutoFlush módban – crash esetén is megmarad
-/// a részleges adat.
+/// Writes to audit.log in AutoFlush mode – partial data survives even
+/// on a crash.
 ///
-/// Log sor formátum:
+/// Log line format:
 ///   {timestamp:yyyy-MM-dd HH:mm:ss.fff} [{level,-5}] [{tag,-16}] {message}
 ///
-/// Példák:
+/// Examples:
 ///   2026-03-17 14:23:01.123 [INFO ] [SESSION_START   ] step=task_breakdown generation=1
 ///   2026-03-17 14:23:01.124 [INFO ] [CONFIG          ] model=qwen-7b system_prompt_length=342
 ///   2026-03-17 14:25:43.891 [INFO ] [INFERENCE_DONE  ] tokens=847 elapsed=162s tok_s=5.2
-///   2026-03-17 14:25:50.012 [INFO ] [VALIDATION      ] outcome=Reject clarification="Részletesebb bontás kell"
+///   2026-03-17 14:25:50.012 [INFO ] [VALIDATION      ] outcome=Reject clarification="Needs a more detailed breakdown"
 ///
-/// Custom parser: minden sor fix pozíción tartalmazza a timestamp-et (23 kar),
-/// a level-t (7 kar), a tag-et (18 kar) – ezután a message key=value párokban.
+/// Custom parser: every line has the timestamp (23 chars), the level
+/// (7 chars), and the tag (18 chars) at fixed positions – followed by
+/// the message as key=value pairs.
 /// </summary>
 public sealed class FileAuditLogger : IAuditLogger
 {
     private readonly StreamWriter _writer;
     private bool _disposed;
 
-    // Tag → fix szélességű string (16 kar) a log formátumhoz
+    // Tag → fixed-width string (16 chars) for the log format
     private static readonly Dictionary<AuditEvent, string> Tags = new()
     {
         [AuditEvent.SessionStart] = "SESSION_START",
@@ -59,8 +60,8 @@ public sealed class FileAuditLogger : IAuditLogger
 
     public FileAuditLogger(string logFilePath)
     {
-        // append: true – újrafuttatás esetén a korábbi generációk logjai megmaradnak
-        // ha külön foldert kap, ez mindig üres fájlba ír, de biztonságos
+        // append: true – on a rerun, earlier generations' logs are preserved
+        // since it gets its own folder, this always writes to an empty file, but it's safe
         _writer = new StreamWriter(logFilePath, append: false)
         {
             AutoFlush = true
@@ -77,8 +78,8 @@ public sealed class FileAuditLogger : IAuditLogger
             ? t
             : eventType.ToString().ToUpperInvariant();
 
-        // Fix szélesség: [{level,-5}] [{tag,-16}]
-        // A tag 16 kar szélesen van kitöltve – custom parser pozíció-alapú split-tel kezelheti
+        // Fixed width: [{level,-5}] [{tag,-16}]
+        // The tag is padded to 16 chars wide – a custom parser can use a position-based split
         var line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] [{tag,-16}] {message}";
 
         _writer.WriteLine(line);

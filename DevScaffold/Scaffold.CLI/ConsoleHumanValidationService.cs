@@ -22,17 +22,17 @@ using Scaffold.Domain.Models;
 namespace Scaffold.CLI;
 
 /// <summary>
-/// Konzolos human validációs service implementáció.
-/// Megjeleníti a step kimenetét, bekéri a döntést, és
-/// Reject esetén a pontosítást is bekéri.
+/// Console-based human validation service implementation.
+/// Displays the step's output, requests the decision, and on
+/// Reject also requests a clarification.
 ///
-/// Konzol kimenet Yellow színnel az IScaffoldConsole-on keresztül –
-/// elkülönítve a CLI (Cyan) és Session (Gray) szintű üzenetektől.
-/// Az audit logolás a ScaffoldStepOrchestrator felelőssége –
-/// a döntés ott kerül rögzítésre.
+/// Console output uses Yellow via IScaffoldConsole – kept distinct
+/// from CLI-level (Cyan) and Session-level (Gray) messages.
+/// Audit logging is ScaffoldStepOrchestrator's responsibility –
+/// the decision is recorded there.
 ///
-/// A fájl megnyitása az IFileEditorLauncher-re van delegálva –
-/// a konkrét editor platform-specifikus részlet, nem fér ide.
+/// Opening the file is delegated to IFileEditorLauncher – the concrete
+/// editor is a platform-specific detail that does not belong here.
 /// </summary>
 public sealed class ConsoleHumanValidationService : IHumanValidationService
 {
@@ -53,29 +53,29 @@ public sealed class ConsoleHumanValidationService : IHumanValidationService
         string outputFilePath)
     {
         _console.WriteValidation("─────────────────────────────────────────────────");
-        _console.WriteValidation($"[VALIDATE] Validáció szükséges: {stepId}");
-        _console.WriteValidation($"[VALIDATE] Kimenet fájl: {outputFilePath}");
+        _console.WriteValidation($"[VALIDATE] Validation required: {stepId}");
+        _console.WriteValidation($"[VALIDATE] Output file: {outputFilePath}");
         _console.WriteValidation(string.Empty);
 
-        _console.WriteValidation("[VALIDATE] Megnyitom a kimenetet a szerkesztőben...");
+        _console.WriteValidation("[VALIDATE] Opening the output in the editor...");
 
         if (!_editorLauncher.TryOpen(outputFilePath))
         {
             _console.WriteValidation(
-                "[VALIDATE] Figyelmeztetés: nem sikerült megnyitni a szerkesztőt.");
+                "[VALIDATE] Warning: could not open the editor.");
             _console.WriteValidation(
-                $"[VALIDATE] Nyisd meg manuálisan: {outputFilePath}");
+                $"[VALIDATE] Open it manually: {outputFilePath}");
         }
 
         _console.WriteValidation(string.Empty);
-        _console.WriteValidation("Döntés:");
-        _console.WriteValidation("  [1] Accept  – Elfogadom, következő lépés");
-        _console.WriteValidation("  [2] Edit    – Szerkesztettem, elfogadom a módosított verziót");
-        _console.WriteValidation("  [3] Reject  – Visszaküldöm, pontosítással újragenerálás");
+        _console.WriteValidation("Decision:");
+        _console.WriteValidation("  [1] Accept  – I accept it, proceed to the next step");
+        _console.WriteValidation("  [2] Edit    – I edited it, accept the modified version");
+        _console.WriteValidation("  [3] Reject  – Send it back, regenerate with a clarification");
         _console.WriteValidation(string.Empty);
 
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.Write("Választás (1/2/3): ");
+        Console.Write("Choice (1/2/3): ");
         Console.ResetColor();
 
         while (true)
@@ -94,7 +94,7 @@ public sealed class ConsoleHumanValidationService : IHumanValidationService
 
                 case "3":
                     _console.WriteValidation(string.Empty);
-                    _console.WriteValidation("Pontosítás (mit kell másképp csinálni?):");
+                    _console.WriteValidation("Clarification (what should be done differently?):");
 
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.Write("> ");
@@ -109,7 +109,7 @@ public sealed class ConsoleHumanValidationService : IHumanValidationService
 
                 default:
                     Console.ForegroundColor = ConsoleColor.Yellow;
-                    Console.Write("Érvénytelen választás. Kérlek 1, 2 vagy 3: ");
+                    Console.Write("Invalid choice. Please enter 1, 2, or 3: ");
                     Console.ResetColor();
                     break;
             }

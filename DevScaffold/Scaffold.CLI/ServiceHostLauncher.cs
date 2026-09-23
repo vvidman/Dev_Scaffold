@@ -21,16 +21,16 @@ using System.Diagnostics;
 namespace Scaffold.CLI;
 
 /// <summary>
-/// ServiceHost process automatikus indítása és pipe-ready várakozás.
+/// Automatic ServiceHost process startup and waiting for pipe-ready.
 ///
 /// Retry policy (ADR #10):
-/// - Maximum 3 kísérlet
-/// - Kísérletenként 60 másodperces timeout a ServiceReadyEvent-re
-/// - Kísérletek között nincs várakozás – timeout lejárta után azonnal indul
+/// - Maximum 3 attempts
+/// - 60-second timeout per attempt for ServiceReadyEvent
+/// - No delay between attempts – starts immediately after a timeout expires
 ///
-/// ServiceHost futás ellenőrzése (ADR #9):
-/// - Named Pipe fájl létezését teszteli a pipe-ra való csatlakozás helyett
-/// - File.Exists(@"\\.\pipe\{name}") – nem fogyasztja el a szerver várakozását
+/// Checking whether the ServiceHost is running (ADR #9):
+/// - Tests whether the Named Pipe file exists, instead of connecting to the pipe
+/// - File.Exists(@"\\.\pipe\{name}") – does not consume the server's wait
 /// </summary>
 public class ServiceHostLauncher
 {
@@ -55,11 +55,11 @@ public class ServiceHostLauncher
     }
 
     /// <summary>
-    /// Biztosítja hogy a ServiceHost fut és kész fogadni parancsokat.
-    /// Visszaad egy csatlakoztatott, kész PipeClient-et.
+    /// Ensures the ServiceHost is running and ready to receive commands.
+    /// Returns a connected, ready PipeClient.
     /// </summary>
     /// <exception cref="InvalidOperationException">
-    /// Ha 3 kísérlet után sem sikerül elindítani a ServiceHost-ot.
+    /// If the ServiceHost still cannot be started after 3 attempts.
     /// </exception>
     public async Task<PipeClient> EnsureRunningAsync(
         CancellationToken cancellationToken = default)
@@ -67,34 +67,34 @@ public class ServiceHostLauncher
         for (int attempt = 1; attempt <= MaxAttempts; attempt++)
         {
             Console.WriteLine(
-                $"[SCAFFOLD] ServiceHost indítás ({attempt}/{MaxAttempts})...");
+                $"[SCAFFOLD] Starting ServiceHost ({attempt}/{MaxAttempts})...");
 
             var pipeClient = await TryStartAndConnectAsync(cancellationToken);
 
             if (pipeClient is not null)
             {
-                Console.WriteLine("[SCAFFOLD] ServiceHost kész.");
+                Console.WriteLine("[SCAFFOLD] ServiceHost ready.");
                 return pipeClient;
             }
 
             if (attempt < MaxAttempts)
             {
                 Console.WriteLine(
-                    $"[SCAFFOLD] ServiceHost nem válaszolt ({attempt}/{MaxAttempts}). " +
-                    $"Újrapróbálkozás...");
+                    $"[SCAFFOLD] ServiceHost did not respond ({attempt}/{MaxAttempts}). " +
+                    $"Retrying...");
             }
         }
 
         throw new InvalidOperationException(
-            $"[SCAFFOLD ERROR] ServiceHost {MaxAttempts} kísérlet után sem válaszolt. " +
-            $"Ellenőrizd a következőket:\n" +
+            $"[SCAFFOLD ERROR] ServiceHost did not respond after {MaxAttempts} attempts. " +
+            $"Check the following:\n" +
             $"  - ServiceHost path: {_serviceHostPath}\n" +
             $"  - Models yaml: {_modelsYamlPath}\n" +
-            $"  - Output mappa: {_outputBasePath}");
+            $"  - Output folder: {_outputBasePath}");
     }
 
     // ─────────────────────────────────────────────
-    // Privát implementáció
+    // Private implementation
     // ─────────────────────────────────────────────
 
     private async Task<PipeClient?> TryStartAndConnectAsync(
@@ -103,17 +103,17 @@ public class ServiceHostLauncher
         if (IsServiceHostRunning())
         {
             Console.WriteLine(
-                "[SCAFFOLD] ServiceHost pipe él. Csatlakozás...");
+                "[SCAFFOLD] ServiceHost pipe is alive. Connecting...");
         }
         else
         {
-            Console.WriteLine("[SCAFFOLD] ServiceHost process indítása...");
+            Console.WriteLine("[SCAFFOLD] Starting ServiceHost process...");
             StartServiceHostProcess();
         }
 
         var pipeClient = new PipeClient(_pipeName);
 
-        // 1. Event pipe csatlakozás
+        // 1. Event pipe connection
         try
         {
             await pipeClient.ConnectAsync(cancellationToken);
@@ -122,13 +122,13 @@ public class ServiceHostLauncher
         {
             await pipeClient.DisposeAsync();
             Console.Error.WriteLine(
-                $"[SCAFFOLD] Event pipe csatlakozás sikertelen: {ex.Message}");
+                $"[SCAFFOLD] Event pipe connection failed: {ex.Message}");
             return null;
         }
 
-        // 2. ServiceReadyEvent várakozás (közvetlen pipe olvasás, event loop nélkül)
+        // 2. Waiting for ServiceReadyEvent (direct pipe read, no event loop yet)
         Console.WriteLine(
-            $"[SCAFFOLD] Várakozás ServiceHost ready jelzésre " +
+            $"[SCAFFOLD] Waiting for ServiceHost ready signal " +
             $"(max {ReadyTimeout.TotalSeconds}s)...");
 
         var isReady = await pipeClient.WaitForReadyAsync(ReadyTimeout, cancellationToken);
@@ -139,7 +139,7 @@ public class ServiceHostLauncher
             return null;
         }
 
-        // 3. Event loop indítás + command pipe csatlakozás
+        // 3. Starting the event loop + connecting to the command pipe
         try
         {
             await pipeClient.StartAsync(cancellationToken);
@@ -148,7 +148,7 @@ public class ServiceHostLauncher
         {
             await pipeClient.DisposeAsync();
             Console.Error.WriteLine(
-                $"[SCAFFOLD] Command pipe csatlakozás sikertelen: {ex.Message}");
+                $"[SCAFFOLD] Command pipe connection failed: {ex.Message}");
             return null;
         }
 
@@ -156,22 +156,22 @@ public class ServiceHostLauncher
     }
 
     /// <summary>
-    /// Ellenőrzi hogy él-e már a ServiceHost event pipe-ja.
+    /// Checks whether the ServiceHost's event pipe is already alive.
     ///
-    /// File.Exists-et használ Connect helyett – így nem fogyasztja el
-    /// a szerver oldal WaitForConnectionAsync várakozását (ADR #9).
+    /// Uses File.Exists instead of Connect – this way it does not
+    /// consume the server side's WaitForConnectionAsync wait (ADR #9).
     /// </summary>
     private bool IsServiceHostRunning() =>
         File.Exists($@"\\.\pipe\{_pipeName}-events");
 
     /// <summary>
-    /// Elindítja a ServiceHost processt a szükséges argumentumokkal.
+    /// Starts the ServiceHost process with the required arguments.
     /// </summary>
     private void StartServiceHostProcess()
     {
         if (!File.Exists(_serviceHostPath))
             throw new FileNotFoundException(
-                $"ServiceHost binary nem található: {_serviceHostPath}");
+                $"ServiceHost binary not found: {_serviceHostPath}");
 
         var processInfo = new ProcessStartInfo
         {
@@ -185,9 +185,9 @@ public class ServiceHostLauncher
 
         var process = Process.Start(processInfo)
             ?? throw new InvalidOperationException(
-                "ServiceHost process indítása sikertelen.");
+                "Failed to start the ServiceHost process.");
 
-        Console.WriteLine($"[SCAFFOLD] ServiceHost process elindítva. PID: {process.Id}");
+        Console.WriteLine($"[SCAFFOLD] ServiceHost process started. PID: {process.Id}");
     }
 
     private string BuildArguments() =>

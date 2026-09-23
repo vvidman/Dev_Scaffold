@@ -19,21 +19,21 @@
 namespace Scaffold.Application.Artifacts;
 
 /// <summary>
-/// Markdown szövegből artifact fájlok kinyerésének absztrakciója.
+/// Abstraction for extracting artifact files from markdown text.
 /// </summary>
 public interface IMarkdownArtifactExtractor
 {
     /// <summary>
-    /// Kinyeri az összes code blockot a markdown szövegből.
+    /// Extracts all code blocks from the markdown text.
     /// </summary>
-    /// <param name="markdownContent">A feldolgozandó markdown szöveg.</param>
+    /// <param name="markdownContent">The markdown text to process.</param>
     /// <param name="filepathHintPrefix">
-    /// A code block első sorában keresett prefix (pl. "// filepath:").
-    /// Ha null, minden artifact fallback névgenerálást kap.
+    /// The prefix looked for on the code block's first line (e.g. "// filepath:").
+    /// If null, every artifact gets a fallback generated name.
     /// </param>
     /// <returns>
-    /// A kinyert artifactok listája. Üres lista ha nincs code block.
-    /// Minden code block pontosan egy artifactot eredményez.
+    /// The list of extracted artifacts. Empty list if there is no code block.
+    /// Every code block results in exactly one artifact.
     /// </returns>
     IReadOnlyList<ExtractedArtifact> Extract(string markdownContent, string? filepathHintPrefix);
 }

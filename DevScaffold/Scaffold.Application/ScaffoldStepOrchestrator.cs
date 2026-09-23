@@ -24,17 +24,17 @@ using Scaffold.Validation.Abstractions;
 namespace Scaffold.Application;
 
 /// <summary>
-/// Egy scaffold lépés végrehajtásának orchestrálása retry looppal.
+/// Orchestrates the execution of a single scaffold step with a retry loop.
 ///
-/// Felelőssége kizárólag a vezérlési folyamat:
-/// - Config betöltés és input összerakás
-/// - InferRequest összeállítása és elküldése
-/// - Döntés alapján loop vagy kilépés
-/// - Refinement kontextus átadása következő kísérletnek
+/// Its responsibility is strictly the control flow:
+/// - Loading config and assembling the input
+/// - Building and sending the InferRequest
+/// - Looping or exiting based on the decision
+/// - Passing the refinement context to the next attempt
 ///
-/// Az eredmény feldolgozása (event figyelés, validáció, human döntés)
-/// az IInferenceResultHandler felelőssége.
-/// A refinement prompt felépítése az IRefinementStrategy felelőssége.
+/// Processing the result (event handling, validation, human decision) is
+/// the responsibility of IInferenceResultHandler.
+/// Building the refinement prompt is the responsibility of IRefinementStrategy.
 /// </summary>
 public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
 {
@@ -132,7 +132,7 @@ public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
             var request = BuildRequest(agentConfig, effectiveSystemPrompt, assembledInput);
 
             if (attemptNumber > 1)
-                _console.WriteSession($"[SESSION] Refinement futás #{attemptNumber}");
+                _console.WriteSession($"[SESSION] Refinement run #{attemptNumber}");
 
             _auditLogger.Log(AuditEvent.InferenceStart,
                 $"request_id={request.RequestId} step={request.StepId} " +
@@ -149,11 +149,11 @@ public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
             {
                 refinementClarification = decision.RejectionClarification;
                 var source = IsAutoReject(decision) ? "Auto-reject" : "Human reject";
-                _console.WriteSession($"[SESSION] {source} #{attemptNumber} – refinement következik.");
+                _console.WriteSession($"[SESSION] {source} #{attemptNumber} – refinement follows.");
                 continue;
             }
 
-            // Accept vagy Edit: kilépés a loop-ból
+            // Accept or Edit: exit the loop
             var totalElapsed = (DateTime.UtcNow - startTime).TotalSeconds;
             _auditLogger.Log(AuditEvent.SessionEnd,
                 $"total_elapsed={totalElapsed}s outcome={decision.Outcome} attempts={attemptNumber}");
@@ -165,7 +165,7 @@ public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     // ─────────────────────────────────────────────
-    // Privát segédmetódusok
+    // Private helper methods
     // ─────────────────────────────────────────────
 
     private async Task<ValidationDecision> HandleMaxAttemptsReachedAsync(
@@ -174,8 +174,8 @@ public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
         int attemptNumber)
     {
         _console.WriteSession(
-            $"[SESSION] Maximum kísérletszám elérve ({MaxAttempts}). " +
-            "Human beavatkozás szükséges.");
+            $"[SESSION] Maximum attempt count reached ({MaxAttempts}). " +
+            "Human intervention required.");
         _auditLogger.Log(AuditEvent.Error,
             $"reason=max_attempts_reached attempts={attemptNumber}");
 
@@ -184,7 +184,7 @@ public sealed class ScaffoldStepOrchestrator : IAsyncDisposable
                 agentConfig.Step, lastDecision.ValidatedOutputFilePath);
 
         throw new InvalidOperationException(
-            $"Maximum kísérletszám elérve ({MaxAttempts}) érvényes kimenet nélkül.");
+            $"Maximum attempt count reached ({MaxAttempts}) without a valid output.");
     }
 
     private InferRequest BuildRequest(

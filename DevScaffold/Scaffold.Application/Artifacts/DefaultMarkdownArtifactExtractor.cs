@@ -21,30 +21,30 @@ using System.Text.RegularExpressions;
 namespace Scaffold.Application.Artifacts;
 
 /// <summary>
-/// Markdown code blockokat kinyerő implementáció.
+/// Extracts markdown code blocks.
 ///
-/// Feldolgozási szabályok:
-/// 1. Keres minden ``` ... ``` blokkot (fenced code block)
-/// 2. Ha a blokk első sora a filepathHintPrefix-szel kezdődik,
-///    az utána következő szöveg a RelativeFilePath (trimmelve)
-///    és ez a sor NEM kerül bele a Content-be
-/// 3. Ha nincs filepath hint: fallback "artifact_{N:D2}.{ext}" ahol
-///    N a blokk sorszáma (1-től), ext a language-ből képzett kiterjesztés
-/// 4. Ismeretlen language esetén az ext "txt"
+/// Processing rules:
+/// 1. Looks for every ``` ... ``` block (fenced code block)
+/// 2. If the block's first line starts with filepathHintPrefix,
+///    the text after it (trimmed) becomes RelativeFilePath
+///    and that line is NOT included in Content
+/// 3. If there is no filepath hint: falls back to "artifact_{N:D2}.{ext}" where
+///    N is the block's index (starting at 1), ext is derived from the language
+/// 4. For an unknown language, ext is "txt"
 ///
-/// Language → extension leképezés:
+/// Language → extension mapping:
 ///   csharp, cs → cs
 ///   xml        → xml
 ///   json       → json
 ///   yaml, yml  → yaml
 ///   sql        → sql
 ///   bash, sh   → sh
-///   egyéb      → txt
+///   other      → txt
 /// </summary>
 public sealed class DefaultMarkdownArtifactExtractor : IMarkdownArtifactExtractor
 {
     // Fenced code block: ```language\ncontent\n```
-    // A language sor opcionális. Multiline, non-greedy content match.
+    // The language line is optional. Multiline, non-greedy content match.
     private static readonly Regex CodeBlockRegex = new(
         @"^```(?<lang>[^\r\n]*)\r?\n(?<content>.*?)^```",
         RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
@@ -107,7 +107,7 @@ public sealed class DefaultMarkdownArtifactExtractor : IMarkdownArtifactExtracto
             }
         }
 
-        // Fallback névgenerálás
+        // Fallback name generation
         var ext = LanguageExtensions.GetValueOrDefault(language, "txt");
         return ($"artifact_{index:D2}.{ext}", rawContent);
     }

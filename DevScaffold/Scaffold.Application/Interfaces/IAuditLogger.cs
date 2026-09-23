@@ -20,28 +20,28 @@ using Scaffold.Application;
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Step-szintű audit log absztrakciója.
+/// Abstraction for the step-level audit log.
 ///
-/// Minden session saját log fájlt kap (audit.log a step output folderben).
-/// A log folyamatosan íródik auto-flush módban – crash esetén is megmarad
-/// a részleges adat.
+/// Each session gets its own log file (audit.log in the step output folder).
+/// The log is written continuously in auto-flush mode – partial data
+/// survives even on a crash.
 ///
-/// Log sor formátum (custom parser-barát):
+/// Log line format (custom-parser-friendly):
 ///   2026-03-17 14:23:01.123 [INFO ] [SESSION_START   ] step=task_breakdown generation=1
 ///   2026-03-17 14:25:43.891 [INFO ] [INFERENCE_DONE  ] tokens=847 elapsed=162s tok_s=5.2
 ///
-/// A tag mező fix 16 karakter széles – statisztikai feldolgozásnál
-/// egyszerű string split elegendő a szintaktikai elemzés helyett.
+/// The tag field is a fixed 16 characters wide – for statistical processing
+/// a simple string split is enough, no syntactic parsing needed.
 /// </summary>
 public interface IAuditLogger : IAsyncDisposable
 {
     /// <summary>
-    /// Bejegyzést ír az audit logba.
+    /// Writes an entry to the audit log.
     /// </summary>
-    /// <param name="eventType">Az esemény típusa – meghatározza a log sor tag-jét.</param>
+    /// <param name="eventType">The event's type – determines the log line's tag.</param>
     /// <param name="message">
-    /// A log sor tartalma key=value párokban.
-    /// Pl.: "step=task_breakdown generation=2 model=qwen-7b"
+    /// The log line's content, as key=value pairs.
+    /// E.g.: "step=task_breakdown generation=2 model=qwen-7b"
     /// </param>
     void Log(AuditEvent eventType, string message);
 }

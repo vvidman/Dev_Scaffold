@@ -21,27 +21,27 @@ using Scaffold.Validation.Abstractions;
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Egy sikertelen kísérlet utáni refinement logika absztrakciója.
+/// Abstraction for the refinement logic that follows a failed attempt.
 ///
-/// Két triggert kezel egységesen:
-/// - Automatikus reject: az IOutputValidator talált szabálysértést
-/// - Human reject: a human reviewer visszaküldte pontosítással
+/// Handles two triggers uniformly:
+/// - Automatic reject: IOutputValidator found a rule violation
+/// - Human reject: the human reviewer sent it back with a clarification
 ///
-/// A ScaffoldStepOrchestrator ezzel az interfésszel dönt arról,
-/// hogy mit adjon át a következő kísérletnek system prompt kiegészítésként.
+/// ScaffoldStepOrchestrator uses this interface to decide what to pass
+/// to the next attempt as a system prompt addition.
 /// </summary>
 public interface IRefinementStrategy
 {
     /// <summary>
-    /// Automatikus validációs hiba alapján felépíti a refinement clarification-t.
-    /// Az eredmény tartalmazza a szabálysértések fix-hint-jeit,
-    /// amelyeket a modell a következő kísérletben felhasználhat.
+    /// Builds the refinement clarification from an automatic validation failure.
+    /// The result includes the fix hints of the rule violations,
+    /// which the model can use on the next attempt.
     /// </summary>
     string BuildAutoRejectionClarification(OutputValidationResult validationResult);
 
     /// <summary>
-    /// Az eredeti system promptot kiegészíti a refinement kontextussal.
-    /// A clarification forrása lehet automatikus validator vagy human reviewer.
+    /// Extends the original system prompt with the refinement context.
+    /// The clarification's source can be an automatic validator or a human reviewer.
     /// </summary>
     string BuildRefinedSystemPrompt(IAuditLogger logger, string originalSystemPrompt, string clarification);
 }

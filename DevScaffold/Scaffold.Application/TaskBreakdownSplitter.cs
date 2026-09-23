@@ -25,34 +25,34 @@ using static System.Net.Mime.MediaTypeNames;
 namespace Scaffold.Application;
 
 /// <summary>
-/// Az elfogadott task_breakdown markdown kimenetét egyedi task YAML fájlokra bontja.
+/// Splits the accepted task_breakdown markdown output into individual task YAML files.
 ///
-/// Minden numbered task blokkból (pl. "1. Task Title") egy önálló
-/// {stepOutputFolder}/tasks/task_01.yaml fájlt hoz létre, flat YAML struktúrával:
+/// Each numbered task block (e.g. "1. Task Title") becomes its own
+/// {stepOutputFolder}/tasks/task_01.yaml file, with a flat YAML structure:
 ///   task_id, title, description, affected_files, dependencies
 ///
-/// Csak az inline (vesszővel elválasztott) Affected files / Dependencies
-/// formátumot kezeli. A felsorolásos bullet-list formátum nem támogatott.
+/// Only handles the inline (comma-separated) Affected files / Dependencies
+/// format. The bullet-list format is not supported.
 ///
-/// Hiba esetén naplóz és visszatér – nem dobja tovább a kivételt,
-/// mivel az elfogadott kimenetet nem invalidálhatja a YAML generálás sikertelensége.
+/// Logs and returns on error – does not rethrow, since a failed YAML
+/// generation must not invalidate the accepted output.
 /// </summary>
 internal sealed class TaskBreakdownSplitter : IStepPostProcessor
 {
     private readonly IScaffoldConsole _console;
 
-    // Numbered heading: "1." vagy "1. ##" stb. – azonos a TaskBreakdownValidator regex-ével
+    // Numbered heading: "1." or "1. ##" etc. – same as TaskBreakdownValidator's regex
     private static readonly Regex TaskHeadingRegex =
         new(@"^(\d+)\.\s", RegexOptions.Multiline | RegexOptions.Compiled);
 
-    // "Affected files:" sor – azonos a TaskBreakdownValidator AffectedFilesLineRegex-ével
+    // "Affected files:" line – same as TaskBreakdownValidator's AffectedFilesLineRegex
     private static readonly Regex AffectedFilesRegex =
         new(@"Affected files?:\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex DependenciesRegex =
         new(@"Dependencies?:\s*(.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    // Labeled field kezdete (pl. "Description:", "Affected files:")
+    // Start of a labeled field (e.g. "Description:", "Affected files:")
     private static readonly Regex LabeledFieldRegex =
         new(@"^\w[\w\s]*:", RegexOptions.Compiled);
 
@@ -72,7 +72,7 @@ internal sealed class TaskBreakdownSplitter : IStepPostProcessor
         if (!File.Exists(context.AcceptedFilePath))
         {
             _console.WriteError(
-                $"[SCAFFOLD WARNING] TaskBreakdownSplitter: fájl nem található: {context.AcceptedFilePath}");
+                $"[SCAFFOLD WARNING] TaskBreakdownSplitter: file not found: {context.AcceptedFilePath}");
             return;
         }
 
@@ -82,7 +82,7 @@ internal sealed class TaskBreakdownSplitter : IStepPostProcessor
         if (tasks.Count == 0)
         {
             _console.WriteError(
-                "[SCAFFOLD WARNING] TaskBreakdownSplitter: nem találhatók numbered task blokkok a kimenetben.");
+                "[SCAFFOLD WARNING] TaskBreakdownSplitter: no numbered task blocks found in the output.");
             return;
         }
 
@@ -100,11 +100,11 @@ internal sealed class TaskBreakdownSplitter : IStepPostProcessor
         }
 
         _console.WriteCli(
-            $"[SCAFFOLD] {tasks.Count} task YAML fájl létrehozva: {tasksFolder}");
+            $"[SCAFFOLD] {tasks.Count} task YAML file(s) created: {tasksFolder}");
     }
 
     // ─────────────────────────────────────────────
-    // Privát segédmetódusok
+    // Private helper methods
     // ─────────────────────────────────────────────
 
     private static IReadOnlyList<string> SplitIntoTaskBlocks(string content)
@@ -140,21 +140,21 @@ internal sealed class TaskBreakdownSplitter : IStepPostProcessor
     }
 
     /// <summary>
-    /// Eltávolítja a heading prefixet (pl. "1. " vagy "## 1. ").
+    /// Removes the heading prefix (e.g. "1. " or "## 1. ").
     /// </summary>
     private static string StripHeadingPrefix(string line)
     {
-        // Markdown heading jelölők eltávolítása
+        // Remove markdown heading markers
         var stripped = line.TrimStart('#', ' ');
 
-        // Numbered prefix eltávolítása (pl. "1. ")
+        // Remove the numbered prefix (e.g. "1. ")
         var match = Regex.Match(stripped, @"^\d+\.\s*");
         return match.Success ? stripped[match.Length..].Trim() : stripped.Trim();
     }
 
     /// <summary>
-    /// Kinyeri a labeled field értékét és comma-split listává alakítja.
-    /// Ha az érték "None", "-" vagy üres, üres listát ad vissza.
+    /// Extracts the value of a labeled field and turns it into a comma-split list.
+    /// If the value is "None", "-" or empty, returns an empty list.
     /// </summary>
     private static List<string> ExtractListField(string block, Regex fieldRegex)
     {
@@ -177,8 +177,8 @@ internal sealed class TaskBreakdownSplitter : IStepPostProcessor
 }
 
 /// <summary>
-/// Egy task YAML fájl tartalmát képviseli.
-/// A YamlDotNet UnderscoredNamingConvention-nel szerializálja.
+/// Represents the content of a single task YAML file.
+/// Serialized with YamlDotNet's UnderscoredNamingConvention.
 /// </summary>
 internal sealed class TaskYamlModel
 {

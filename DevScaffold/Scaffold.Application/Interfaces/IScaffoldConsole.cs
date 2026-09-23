@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -19,28 +19,28 @@
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Konzol kimenet absztrakciója – szint szerinti színkódolással.
+/// Console output abstraction – colour-coded by level.
 ///
-/// Három szint:
-///   CLI        – Cyan   – infrastruktúra üzenetek (pipe, ServiceHost, indítás)
-///   Session    – Gray   – inference progress, ServiceHost események
-///   Validation – Yellow – human validációs interakció
-///   Error      – Red    – hibák (stderr-re kerül)
+/// Four levels:
+///   CLI        – Cyan   – infrastructure messages (pipe, ServiceHost, startup)
+///   Session    – Gray   – inference progress, ServiceHost events
+///   Validation – Yellow – human validation interaction
+///   Error      – Red    – errors (written to stderr)
 ///
-/// Az absztrakció tesztelhetővé teszi a konzol kimenetet,
-/// és egységes prefixelést biztosít minden kimeneti ponton.
+/// The abstraction makes console output testable, and guarantees
+/// consistent prefixing at every output point.
 /// </summary>
 public interface IScaffoldConsole
 {
-    /// <summary>CLI szintű üzenet – infrastruktúra, indítás, kapcsolat. (Cyan)</summary>
+    /// <summary>CLI-level message – infrastructure, startup, connection. (Cyan)</summary>
     void WriteCli(string message);
 
-    /// <summary>Session szintű üzenet – inference progress, ServiceHost eventi. (Gray)</summary>
+    /// <summary>Session-level message – inference progress, ServiceHost events. (Gray)</summary>
     void WriteSession(string message);
 
-    /// <summary>Validációs üzenet – human interakció, döntés bekérés. (Yellow)</summary>
+    /// <summary>Validation message – human interaction, decision prompt. (Yellow)</summary>
     void WriteValidation(string message);
 
-    /// <summary>Hiba üzenet – stderr-re kerül. (Red)</summary>
+    /// <summary>Error message – written to stderr. (Red)</summary>
     void WriteError(string message);
 }

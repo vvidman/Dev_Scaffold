@@ -21,15 +21,15 @@ using Scaffold.Application.Interfaces;
 namespace Scaffold.Application.Artifacts;
 
 /// <summary>
-/// A coding step elfogadott markdown kimenetéből kinyeri a code blockokat
-/// és az artifacts/ almappába írja őket.
+/// Extracts the code blocks from the coding step's accepted markdown output
+/// and writes them into the artifacts/ subfolder.
 ///
-/// Output struktúra:
+/// Output structure:
 ///   {StepOutputFolder}/artifacts/{RelativeFilePath}
-///   Pl. .../coding_1/artifacts/src/Services/FooService.cs
+///   E.g. .../coding_1/artifacts/src/Services/FooService.cs
 ///
-/// Hiba esetén naplóz és visszatér – az elfogadott kimenetet
-/// nem invalidálhatja az artifact kinyerés sikertelensége.
+/// Logs and returns on error – a failed artifact extraction must not
+/// invalidate the accepted output.
 /// </summary>
 public sealed class CodingOutputExtractor : IStepPostProcessor
 {
@@ -56,24 +56,35 @@ public sealed class CodingOutputExtractor : IStepPostProcessor
         if (artifacts.Count == 0)
         {
             _console.WriteSession(
-                "[POST] Coding: nem található code block a kimenetben.");
+                "[POST] Coding: no code block found in the output.");
             return;
         }
 
         var artifactsRoot = Path.Combine(context.StepOutputFolder, "artifacts");
 
+        var written = 0;
+        var skipped = 0;
+
         foreach (var artifact in artifacts)
         {
-            var targetPath = Path.Combine(artifactsRoot, artifact.RelativeFilePath);
+            if (!ArtifactPathGuard.TryResolveWithin(artifactsRoot, artifact.RelativeFilePath, out var targetPath))
+            {
+                _console.WriteValidation(
+                    $"[POST] Artifact skipped – unsafe path outside artifacts/: \"{artifact.RelativeFilePath}\"");
+                skipped++;
+                continue;
+            }
+
             var targetDir = Path.GetDirectoryName(targetPath)!;
 
             Directory.CreateDirectory(targetDir);
             await File.WriteAllTextAsync(targetPath, artifact.Content, context.CancellationToken);
 
-            _console.WriteSession($"[POST] Artifact kimentve: {artifact.RelativeFilePath}");
+            _console.WriteSession($"[POST] Artifact saved: {artifact.RelativeFilePath}");
+            written++;
         }
 
         _console.WriteSession(
-            $"[POST] Coding: {artifacts.Count} artifact kimentve → {artifactsRoot}");
+            $"[POST] Coding: {written} written, {skipped} skipped → {artifactsRoot}");
     }
 }

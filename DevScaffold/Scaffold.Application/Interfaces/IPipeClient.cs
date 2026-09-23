@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -21,24 +21,24 @@ using Scaffold.Agent.Protocol;
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Kétirányú kommunikáció absztrakciója a ServiceHost felé.
+/// Abstraction for bidirectional communication with the ServiceHost.
 ///
-/// A CLI oldalon a PipeClient implementálja – Named Pipe-on keresztül
-/// küldi a parancsokat és fogadja az eseményeket.
+/// Implemented by PipeClient on the CLI side – sends commands and
+/// receives events over a Named Pipe.
 ///
-/// Az interfész a Scaffold.Application rétegben él, így a ScaffoldSession
-/// nem függ közvetlenül a CLI infrastruktúrától.
+/// The interface lives in the Scaffold.Application layer, so
+/// ScaffoldSession does not depend directly on CLI infrastructure.
 /// </summary>
 public interface IPipeClient
 {
     /// <summary>
-    /// Esemény – minden beérkező EventEnvelope-hoz meghívódik.
-    /// Az IInferenceResultHandler feliratkozik erre az inference futása alatt.
+    /// Event – raised for every incoming EventEnvelope.
+    /// IInferenceResultHandler subscribes to this while an inference is running.
     /// </summary>
     event Func<EventEnvelope, Task>? EventReceived;
 
     /// <summary>
-    /// CommandEnvelope küldése a ServiceHost-nak.
+    /// Sends a CommandEnvelope to the ServiceHost.
     /// </summary>
     Task SendAsync(CommandEnvelope envelope, CancellationToken cancellationToken = default);
 }

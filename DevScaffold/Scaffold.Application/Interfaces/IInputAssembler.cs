@@ -19,27 +19,27 @@
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Input fájlok összeszereléséért felelős absztrakció.
-/// Beolvassa a YAML input sémát, feloldja a path referenciákat,
-/// és összeállítja az AI-nak átadható prompt kontextust.
+/// Abstraction responsible for assembling input files.
+/// Reads the YAML input schema, resolves the path references,
+/// and assembles the prompt context handed to the AI.
 ///
-/// Fail fast: ha bármely path referencia nem létezik vagy nem olvasható,
-/// kivételt dob – részleges kontextussal az AI nem indulhat el.
+/// Fail fast: if any path reference does not exist or cannot be read,
+/// throws an exception – the AI must not start with a partial context.
 /// </summary>
 public interface IInputAssembler
 {
     /// <summary>
-    /// Beolvassa az input yaml fájlt, feloldja az összes path referenciát,
-    /// és visszaad egy teljes, AI-nak átadható kontextus stringet.
-    /// Ha secondaryInputYamlPath meg van adva, annak tartalma a primary input
-    /// után fűződik "\n\n---\n\n" elválasztóval.
+    /// Reads the input yaml file, resolves all path references,
+    /// and returns a full context string that can be passed to the AI.
+    /// If secondaryInputYamlPath is given, its content is appended after
+    /// the primary input with a "\n\n---\n\n" separator.
     /// </summary>
     /// <exception cref="ScaffoldInputValidationException">
-    /// Ha bármely path referencia nem található.
+    /// If any path reference is not found.
     /// </exception>
     /// <param name="secondaryInputYamlPath">
-    /// Opcionális másodlagos input YAML (pl. tasks/task_01.yaml).
-    /// Ha null, a viselkedés azonos a korábbival.
+    /// Optional secondary input YAML (e.g. tasks/task_01.yaml).
+    /// If null, behavior is identical to before.
     /// </param>
     string Assemble(string inputYamlPath, string stepId, string? secondaryInputYamlPath = null);
 }

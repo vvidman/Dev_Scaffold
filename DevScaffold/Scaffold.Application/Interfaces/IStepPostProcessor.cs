@@ -19,22 +19,22 @@
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Elfogadott step kimenet utófeldolgozásának absztrakciója.
+/// Abstraction for post-processing an accepted step output.
 ///
-/// Az IStepOutputValidator mintáját követi: minden implementáció
-/// egy konkrét stephez kötött (StepId), és Accept/Edit után fut.
+/// Follows the IStepOutputValidator pattern: every implementation is
+/// bound to a specific step (StepId), and runs after Accept/Edit.
 ///
-/// Az implementáció hibája nem invalidálja az elfogadást –
-/// a hívó kód naplóz és folytatja (exit 0).
+/// A failure in the implementation does not invalidate the acceptance –
+/// the caller logs it and continues (exit 0).
 /// </summary>
 public interface IStepPostProcessor
 {
-    /// <summary>A step azonosítója, amelyre ez a feldolgozó vonatkozik (pl. "task_breakdown").</summary>
+    /// <summary>The step identifier this processor applies to (e.g. "task_breakdown").</summary>
     string StepId { get; }
 
     /// <summary>
-    /// Végrehajtja az utófeldolgozást az elfogadott kimeneten.
+    /// Runs post-processing on the accepted output.
     /// </summary>
-    /// <param name="context">A feldolgozás teljes kontextusa (lásd <see cref="PostProcessorContext"/>).</param>
+    /// <param name="context">The full processing context (see <see cref="PostProcessorContext"/>).</param>
     Task ProcessAsync(PostProcessorContext context);
 }

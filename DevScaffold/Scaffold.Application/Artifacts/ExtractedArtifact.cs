@@ -19,19 +19,19 @@
 namespace Scaffold.Application.Artifacts;
 
 /// <summary>
-/// Egyetlen markdown code blockból kinyert artifact.
+/// A single artifact extracted from a markdown code block.
 /// </summary>
 public sealed record ExtractedArtifact(
     /// <summary>
-    /// A célfájl relatív útvonala a projekt gyökeréhez képest.
-    /// Pl. "src/Services/FooService.cs"
-    /// A filepath hint-ből érkezik, vagy fallback névgenerálással áll elő.
+    /// The target file's path, relative to the project root.
+    /// E.g. "src/Services/FooService.cs"
+    /// Comes from the filepath hint, or is produced by fallback name generation.
     /// </summary>
     string RelativeFilePath,
     /// <summary>
-    /// A code block language azonosítója (pl. "csharp", "xml", "json").
-    /// Üres string ha a code block language-et nem tartalmaz.
+    /// The code block's language identifier (e.g. "csharp", "xml", "json").
+    /// Empty string if the code block has no language.
     /// </summary>
     string Language,
-    /// <summary>A code block tartalma, vezető/záró whitespace nélkül.</summary>
+    /// <summary>The code block's content, without leading/trailing whitespace.</summary>
     string Content);

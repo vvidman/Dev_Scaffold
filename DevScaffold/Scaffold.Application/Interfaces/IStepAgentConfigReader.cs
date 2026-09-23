@@ -21,7 +21,7 @@ using Scaffold.Domain.Models;
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Agent step konfigurációs fájl olvasója.
+/// Reader for the agent step configuration file.
 /// </summary>
 public interface IStepAgentConfigReader
 {

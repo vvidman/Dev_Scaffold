@@ -24,14 +24,13 @@ using Scaffold.Validation.Abstractions;
 namespace Scaffold.Application;
 
 /// <summary>
-/// Egy inference kísérlet eredményének feldolgozása.
+/// Processes the result of a single inference attempt.
 ///
-/// Feliratkozik az IPipeClient eseményeire, megvárja az InferenceCompleted
-/// (vagy Failed/Cancelled) eseményt, elvégzi az automatikus validációt,
-/// majd szükség esetén átadja a döntést az IHumanValidationService-nek.
+/// Subscribes to IPipeClient events, waits for the InferenceCompleted
+/// (or Failed/Cancelled) event, runs automatic validation, then hands
+/// the decision over to IHumanValidationService if needed.
 ///
-/// Naplóz minden releváns eseményt az IAuditLogger-en és
-/// IScaffoldConsole-on keresztül.
+/// Logs every relevant event through IAuditLogger and IScaffoldConsole.
 /// </summary>
 internal sealed class InferenceResultHandler : IInferenceResultHandler
 {
@@ -39,17 +38,20 @@ internal sealed class InferenceResultHandler : IInferenceResultHandler
     private readonly IHumanValidationService _humanValidation;
     private readonly IRefinementStrategy _refinementStrategy;
     private readonly IScaffoldConsole _console;
+    private readonly InferenceResultHandlerOptions _options;
 
     public InferenceResultHandler(
         IOutputValidator outputValidator,
         IHumanValidationService humanValidation,
         IRefinementStrategy refinementStrategy,
-        IScaffoldConsole console)
+        IScaffoldConsole console,
+        InferenceResultHandlerOptions options)
     {
         _outputValidator = outputValidator;
         _humanValidation = humanValidation;
         _refinementStrategy = refinementStrategy;
         _console = console;
+        _options = options;
     }
 
     /// <inheritdoc />
@@ -63,40 +65,62 @@ internal sealed class InferenceResultHandler : IInferenceResultHandler
     {
         var completionTcs = new TaskCompletionSource<ValidationDecision>();
 
+        // Liveness timeout: reset on every event for this request_id. Stopped
+        // (infinite) while the human validation prompt is active, because the
+        // human's thinking time is not a ServiceHost failure.
+        var livenessTimeout = _options.InferenceLivenessTimeout;
+        using var livenessCts = new CancellationTokenSource();
+        livenessCts.CancelAfter(livenessTimeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, livenessCts.Token);
+
         Func<EventEnvelope, Task> handler = async evt =>
         {
             switch (evt.EventCase)
             {
                 case EventEnvelope.EventOneofCase.InferenceStarted:
-                    _console.WriteSession(
-                        $"[SESSION] Generálás elindult | step: {evt.InferenceStarted.StepId}" +
-                        $" | modell: {evt.InferenceStarted.ModelAlias}");
+                    if (evt.InferenceStarted.RequestId == request.RequestId)
+                    {
+                        livenessCts.CancelAfter(livenessTimeout);
+                        _console.WriteSession(
+                            $"[SESSION] Generation started | step: {evt.InferenceStarted.StepId}" +
+                            $" | model: {evt.InferenceStarted.ModelAlias}");
+                    }
                     break;
 
                 case EventEnvelope.EventOneofCase.InferenceProgress:
                     if (evt.InferenceProgress.RequestId == request.RequestId)
+                    {
+                        livenessCts.CancelAfter(livenessTimeout);
                         _console.WriteSession($"[SESSION] {evt.InferenceProgress.StatusMessage}");
+                    }
                     break;
 
                 case EventEnvelope.EventOneofCase.InferenceCompleted:
                     if (evt.InferenceCompleted.RequestId == request.RequestId)
+                    {
+                        // Human review starts inside HandleCompletedAsync – suspend the timer.
+                        livenessCts.CancelAfter(Timeout.InfiniteTimeSpan);
                         await HandleCompletedAsync(
                             evt.InferenceCompleted, auditLogger, request, agentConfig, ruleSet, completionTcs);
+                    }
                     break;
 
                 case EventEnvelope.EventOneofCase.InferenceCancelled:
                     if (evt.InferenceCancelled.RequestId == request.RequestId)
                     {
+                        livenessCts.CancelAfter(Timeout.InfiniteTimeSpan);
                         auditLogger.Log(AuditEvent.Error, "reason=inference_cancelled");
                         completionTcs.TrySetResult(
                             new ValidationDecision(ValidationOutcome.Reject,
-                                "Inference megszakítva."));
+                                "Inference cancelled."));
                     }
                     break;
 
                 case EventEnvelope.EventOneofCase.InferenceFailed:
                     if (evt.InferenceFailed.RequestId == request.RequestId)
                     {
+                        livenessCts.CancelAfter(Timeout.InfiniteTimeSpan);
                         auditLogger.Log(AuditEvent.Error,
                             $"reason=inference_failed message=\"{evt.InferenceFailed.ErrorMessage}\"");
                         completionTcs.TrySetException(
@@ -109,7 +133,15 @@ internal sealed class InferenceResultHandler : IInferenceResultHandler
         pipeClient.EventReceived += handler;
         try
         {
-            return await completionTcs.Task.WaitAsync(cancellationToken);
+            return await completionTcs.Task.WaitAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            var timeoutSeconds = (int)livenessTimeout.TotalSeconds;
+            auditLogger.Log(AuditEvent.Error,
+                $"reason=inference_liveness_timeout timeout={timeoutSeconds}s");
+            throw new TimeoutException(
+                $"No event received from ServiceHost for request {request.RequestId} within {timeoutSeconds}s.");
         }
         finally
         {
@@ -118,7 +150,7 @@ internal sealed class InferenceResultHandler : IInferenceResultHandler
     }
 
     // ─────────────────────────────────────────────
-    // Privát implementáció
+    // Private implementation
     // ─────────────────────────────────────────────
 
     private async Task HandleCompletedAsync(
@@ -138,8 +170,8 @@ internal sealed class InferenceResultHandler : IInferenceResultHandler
             $"path={completed.OutputFilePath}");
 
         _console.WriteSession(
-            $"[SESSION] Generálás kész | " +
-            $"{completed.TokensGenerated:N0} token | " +
+            $"[SESSION] Generation done | " +
+            $"{completed.TokensGenerated:N0} tokens | " +
             $"{completed.ElapsedSeconds}s | " +
             $"{TokPerSec(completed.TokensGenerated, completed.ElapsedSeconds):F1} tok/s");
 
@@ -176,7 +208,7 @@ internal sealed class InferenceResultHandler : IInferenceResultHandler
 
     private void LogValidationErrors(OutputValidationResult validationResult, IAuditLogger auditLogger)
     {
-        _console.WriteValidation("[VALIDATE] Automatikus validáció sikertelen – auto-reject.");
+        _console.WriteValidation("[VALIDATE] Automatic validation failed – auto-reject.");
 
         foreach (var error in validationResult.Errors)
         {

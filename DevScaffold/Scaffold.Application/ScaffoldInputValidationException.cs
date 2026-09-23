@@ -19,8 +19,8 @@
 namespace Scaffold.Application;
 
 /// <summary>
-/// Fail fast kivétel: input validáció sikertelen.
-/// Akkor dobódik, ha egy path referencia nem létezik vagy nem olvasható.
+/// Fail-fast exception: input validation failed.
+/// Thrown when a path reference does not exist or cannot be read.
 /// </summary>
 public class ScaffoldInputValidationException : Exception
 {
@@ -41,12 +41,12 @@ public class ScaffoldInputValidationException : Exception
 
     private static string BuildMessage(string stepId, string fieldName, string path) =>
         $"""
-        [SCAFFOLD ERROR] Input validáció sikertelen.
-        Lépés: {stepId}
-        Mező: {fieldName}
+        [SCAFFOLD ERROR] Input validation failed.
+        Step: {stepId}
+        Field: {fieldName}
         Path: {path}
-        Ok: A fájl nem található.
+        Reason: File not found.
 
-        A futás leállt. Javítsd az input sémát és futtasd újra.
+        The run has stopped. Fix the input schema and run again.
         """;
 }

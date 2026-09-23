@@ -21,23 +21,23 @@ using Scaffold.Domain.Models;
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Human validációs interakció absztrakciója.
-/// CLI kontextusban konzolon keresztül valósul meg.
+/// Abstraction for the human validation interaction.
+/// Implemented via the console in the CLI context.
 /// </summary>
 public interface IHumanValidationService
 {
     /// <summary>
-    /// Megjeleníti a step kimenetét, majd bekéri a human döntést.
+    /// Displays the step's output, then requests the human decision.
     /// Accept / Edit / Reject.
     /// </summary>
-    /// <param name="stepId">A step azonosítója (pl. task_breakdown)</param>
-    /// <param name="outputFilePath">A generált kimenet fájl elérési útja</param>
-    /// <returns>A validáció kimenetele és opcionális pontosítás Reject esetén</returns>
+    /// <param name="stepId">The step's identifier (e.g. task_breakdown)</param>
+    /// <param name="outputFilePath">Path to the generated output file</param>
+    /// <returns>The validation outcome, and an optional clarification on Reject</returns>
     Task<ValidationDecision> ValidateAsync(string stepId, string outputFilePath);
 }
 
 /// <summary>
-/// Human validáció eredménye.
+/// Result of human validation.
 /// </summary>
 public record ValidationDecision(
     ValidationOutcome Outcome,

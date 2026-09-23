@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -23,25 +23,25 @@ using Scaffold.Validation.Abstractions;
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Egy inference kísérlet eredményének feldolgozása.
+/// Processes the result of a single inference attempt.
 ///
-/// Feliratkozik a pipe eseményeire, megvárja a befejezést,
-/// elvégzi az automatikus validációt, majd szükség esetén
-/// meghívja a human validációs szolgáltatást.
+/// Subscribes to the pipe's events, waits for completion, runs
+/// automatic validation, then calls the human validation service
+/// if needed.
 ///
-/// Visszaad egy ValidationDecision-t, amelyből a
-/// ScaffoldStepOrchestrator eldönti hogy elfogad, szerkeszt, vagy újrafuttat.
+/// Returns a ValidationDecision, from which ScaffoldStepOrchestrator
+/// decides whether to accept, edit, or rerun.
 /// </summary>
 public interface IInferenceResultHandler
 {
     /// <summary>
-    /// Megvárja az inference eredményét és feldolgozza azt.
+    /// Waits for the inference result and processes it.
     /// </summary>
-    /// <param name="request">Az elküldött inference kérés – request ID alapján szűri az eseményeket.</param>
-    /// <param name="agentConfig">A step konfigurációja – max_tokens ellenőrzéshez szükséges.</param>
-    /// <param name="ruleSet">Opcionális deklaratív validátor szabálykészlet.</param>
-    /// <param name="cancellationToken">Megszakítás token.</param>
-    /// <returns>A validáció eredménye és a kimenet fájl elérési útja.</returns>
+    /// <param name="request">The inference request that was sent – events are filtered by its request ID.</param>
+    /// <param name="agentConfig">The step's configuration – needed for the max_tokens check.</param>
+    /// <param name="ruleSet">Optional declarative validator rule set.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The validation result and the output file's path.</returns>
     Task<ValidationDecision> HandleAsync(
         IPipeClient pipeClient,
         IAuditLogger auditLogger,

@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -19,34 +19,34 @@
 namespace Scaffold.Application;
 
 /// <summary>
-/// Audit log esemény típusok.
-/// Minden típus egy fix szélességű tag-ként jelenik meg a log sorban –
-/// ez teszi lehetővé a custom parser írását statisztikához.
+/// Audit log event types.
+/// Each type appears as a fixed-width tag in the log line –
+/// this is what makes it possible to write a custom parser for statistics.
 /// </summary>
 public enum AuditEvent
 {
-    /// <summary>A CLI session elindult – step és generáció azonosítóval.</summary>
+    /// <summary>The CLI session started – with step and generation identifiers.</summary>
     SessionStart,
 
-    /// <summary>Az agent konfiguráció betöltve – modell, prompt hossz, token limit.</summary>
+    /// <summary>The agent configuration was loaded – model, prompt length, token limit.</summary>
     Config,
 
-    /// <summary>Az inference kérés elküldve a ServiceHost-nak.</summary>
+    /// <summary>The inference request was sent to the ServiceHost.</summary>
     InferenceStart,
 
-    /// <summary>Az inference sikeresen befejeződött – tokenek, sebesség, elapsed.</summary>
+    /// <summary>Inference completed successfully – tokens, speed, elapsed time.</summary>
     InferenceDone,
 
-    /// <summary>Az output fájl elérési útja rögzítve.</summary>
+    /// <summary>The output file's path was recorded.</summary>
     Output,
 
-    /// <summary>A human validáció döntése rögzítve – Accept/Edit/Reject + pontosítás.</summary>
+    /// <summary>The human validation decision was recorded – Accept/Edit/Reject + clarification.</summary>
     Validation,
 
-    /// <summary>A session lezárult – teljes elapsed és végső kimenetel.</summary>
+    /// <summary>The session ended – total elapsed time and final outcome.</summary>
     SessionEnd,
 
-    /// <summary>Hiba esemény – infrastruktúra vagy inference szintű hiba.</summary>
+    /// <summary>Error event – an infrastructure- or inference-level error.</summary>
     Error,
 
     /// <summary> Refinement event - Refinement prompt was created. </summary>

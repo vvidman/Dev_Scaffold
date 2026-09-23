@@ -23,22 +23,23 @@ using Scaffold.Application.Interfaces;
 namespace Scaffold.Application;
 
 /// <summary>
-/// Scaffold.Application réteg DI regisztrációi.
+/// DI registrations for the Scaffold.Application layer.
 ///
-/// Az internal típusok (pl. InferenceResultHandler) kívülről nem
-/// hivatkozhatók közvetlenül – ez a metódus regisztrálja őket
-/// anélkül hogy a láthatóságukat fel kellene oldani.
+/// Internal types (e.g. InferenceResultHandler) cannot be referenced
+/// directly from outside – this method registers them without having
+/// to widen their visibility.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>
-    /// Regisztrálja az Application réteg belső szolgáltatásait.
-    /// A Scaffold.CLI Program.cs hívja a DI konténer felépítésekor.
+    /// Registers the Application layer's internal services.
+    /// Called by Scaffold.CLI Program.cs when building the DI container.
     /// </summary>
     public static IServiceCollection AddScaffoldApplication(
         this IServiceCollection services)
     {
         services.AddSingleton<IRefinementStrategy, RefinementStrategy>();
+        services.AddSingleton(new InferenceResultHandlerOptions());
         services.AddSingleton<IInferenceResultHandler, InferenceResultHandler>();
         services.AddSingleton<IMarkdownArtifactExtractor, DefaultMarkdownArtifactExtractor>();
         services.AddSingleton<IStepPostProcessor, TaskBreakdownSplitter>();

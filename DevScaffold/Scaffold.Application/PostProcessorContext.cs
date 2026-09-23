@@ -19,31 +19,31 @@
 namespace Scaffold.Application;
 
 /// <summary>
-/// Az IStepPostProcessor.ProcessAsync hívásának teljes kontextusa.
-/// Bővíthető újabb mezőkkel anélkül hogy az interface aláírása változna.
+/// Full context of a single IStepPostProcessor.ProcessAsync call.
+/// Extensible with new fields without changing the interface signature.
 /// </summary>
 public sealed record PostProcessorContext(
-    /// <summary>Az elfogadott (Accept/Edit) kimeneti fájl teljes elérési útja.</summary>
+    /// <summary>Full path of the accepted (Accept/Edit) output file.</summary>
     string AcceptedFilePath,
-    /// <summary>A step generációs mappa (pl. .../task_breakdown_1/).</summary>
+    /// <summary>The step's generation folder (e.g. .../task_breakdown_1/).</summary>
     string StepOutputFolder,
-    /// <summary>A projekt gyökérmappája — --apply művelethez és artifact célútvonalhoz.</summary>
+    /// <summary>The project's root folder — for the --apply operation and artifact target paths.</summary>
     string ProjectRootPath,
-    /// <summary>A step azonosítója (pl. "task_breakdown").</summary>
+    /// <summary>The step's identifier (e.g. "task_breakdown").</summary>
     string StepId,
-    /// <summary>A generáció sorszáma (1-től indul).</summary>
+    /// <summary>The generation number (starts at 1).</summary>
     int Generation,
     /// <summary>
-    /// Az opcionális --input override fájl elérési útja.
-    /// Ha meg volt adva, ez az egyedi taszk YAML (pl. tasks/task_01.yaml).
-    /// Ha null, a futás a globális project_context-tel ment.
+    /// Path to the optional --input override file.
+    /// If given, this is the per-task YAML (e.g. tasks/task_01.yaml).
+    /// If null, the run went with the global project_context.
     /// </summary>
     string? InputOverridePath,
     /// <summary>
-    /// A code blockokban keresett fájlútvonal hint prefix.
-    /// A step agent config filepath_hint_prefix mezőjéből érkezik.
-    /// Ha null, az IMarkdownArtifactExtractor fallback névgenerálást használ.
+    /// The filepath hint prefix looked for in code blocks.
+    /// Comes from the step agent config's filepath_hint_prefix field.
+    /// If null, IMarkdownArtifactExtractor falls back to generated names.
     /// </summary>
     string? FilepathHintPrefix,
-    /// <summary>Törlési token.</summary>
+    /// <summary>Cancellation token.</summary>
     CancellationToken CancellationToken);

@@ -22,11 +22,11 @@ using Scaffold.Validation.Abstractions;
 namespace Scaffold.Application;
 
 /// <summary>
-/// Alapértelmezett refinement stratégia implementáció.
+/// Default refinement strategy implementation.
 ///
-/// Az [AUTO] prefix jelzi a system promptban hogy automatikus validator
-/// generálta a clarification-t – ez alapján a modell tudja hogy
-/// szabálysértést kell javítania, nem human preferenciát.
+/// The [AUTO] prefix signals in the system prompt that an automatic
+/// validator generated the clarification – this lets the model know it
+/// must fix a rule violation, not a human preference.
 /// </summary>
 public sealed class RefinementStrategy : IRefinementStrategy
 {

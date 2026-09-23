@@ -21,7 +21,7 @@ using Scaffold.Domain.Models;
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Modell registry (models.yaml) olvasója.
+/// Reader for the model registry (models.yaml).
 /// </summary>
 public interface IModelRegistryReader
 {

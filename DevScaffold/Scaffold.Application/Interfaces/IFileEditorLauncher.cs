@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -19,17 +19,17 @@
 namespace Scaffold.Application.Interfaces;
 
 /// <summary>
-/// Fájl megnyitása szövegszerkesztőben.
-/// Az implementáció platform-specifikus – a hívó nem tudja
-/// hogy notepad, vim, code, vagy bármi más nyílik meg.
+/// Opens a file in a text editor.
+/// The implementation is platform-specific – the caller does not know
+/// whether notepad, vim, code, or anything else opens.
 /// </summary>
 public interface IFileEditorLauncher
 {
     /// <summary>
-    /// Megnyitja a fájlt az operációs rendszer alapértelmezett szövegszerkesztőjében.
-    /// Ha az editor nem indítható el, nem dob kivételt – a hívó feladata
-    /// a fallback megjelenítése.
+    /// Opens the file in the operating system's default text editor.
+    /// If the editor cannot be launched, does not throw – it is the
+    /// caller's responsibility to show a fallback.
     /// </summary>
-    /// <returns>true ha az editor sikeresen elindult, false ha nem.</returns>
+    /// <returns>true if the editor launched successfully, false otherwise.</returns>
     bool TryOpen(string filePath);
 }

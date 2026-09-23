@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -19,8 +19,8 @@
 namespace Scaffold.Domain.Models;
 
 /// <summary>
-/// A Scaffold.CLI.yaml teljes tartalmát reprezentálja.
-/// Az exe melletti yaml fájlból töltődik be, projekt-szintű konfiguráció.
+/// Represents the full content of Scaffold.CLI.yaml.
+/// Loaded from the yaml file next to the exe – project-level configuration.
 /// </summary>
 public sealed class CliProjectConfig
 {
@@ -28,35 +28,35 @@ public sealed class CliProjectConfig
     public string Models { get; init; } = "";
     public string PipeName { get; init; } = "";
     public string Output { get; init; } = "./output";
-    
+
     /// <summary>
-    /// A projekt fő kontextusa – minden stepnek ez az alap bemenete.
-    /// Egyszer definiálva, globálisan érvényes az összes stepre.
+    /// The project's main context – the base input for every step.
+    /// Defined once, applies globally to all steps.
     /// </summary>
     public string ProjectContext { get; init; } = "";
     public Dictionary<string, StepCliConfig> Steps { get; init; } = new();
 
     /// <summary>
-    /// A valódi projekt gyökérmappája — az --apply parancs ide másolja
-    /// az artifacts/ tartalmát. Csak --apply használatakor kötelező.
+    /// The root folder of the actual target project — the --apply command
+    /// copies the contents of artifacts/ here. Required only when using --apply.
     /// </summary>
     public string? ProjectRoot { get; init; }
 }
 
 /// <summary>
-/// Egy step konfigurációs bejegyzése a Scaffold.CLI.yaml steps: szekciójában.
+/// A single step's configuration entry in the steps: section of Scaffold.CLI.yaml.
 /// </summary>
 public sealed class StepCliConfig
 {
-    /// <summary>A step agent YAML config fájl útvonala (pl. task_breakdown_agent.yaml).</summary>
+    /// <summary>Path to the step agent YAML config file (e.g. task_breakdown_agent.yaml).</summary>
     public string InputConfig { get; init; } = "";
 
-    /// <summary>A validator YAML config fájl útvonala. Elhagyható ha a stephez nincs validator.</summary>
+    /// <summary>Path to the validator YAML config file. Optional if the step has no validator.</summary>
     public string? ValidatorConfig { get; init; }
 
-    /// <summary>A models.yaml-ben definiált model alias (pl. qwen2.5-coder-7b-instruct).</summary>
+    /// <summary>The model alias defined in models.yaml (e.g. qwen2.5-coder-7b-instruct).</summary>
     public string ModelAlias { get; init; } = "";
 
-    /// <summary>A step bemeneti YAML fájl útvonala (pl. ./input.yaml vagy előző step outputja).</summary>
+    /// <summary>Path to the step's input YAML file (e.g. ./input.yaml or the previous step's output).</summary>
     public string Input { get; init; } = "";
 }

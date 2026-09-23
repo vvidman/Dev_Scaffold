@@ -19,28 +19,28 @@
 namespace Scaffold.Domain.Models;
 
 /// <summary>
-/// Human validáció lehetséges kimenetei minden step után.
+/// Possible outcomes of human validation after each step.
 /// </summary>
 public enum ValidationOutcome
 {
     /// <summary>
-    /// A kimenet még nem volt értkelve
+    /// The output has not been evaluated yet.
     /// </summary>
     NotValidated,
 
     /// <summary>
-    /// A kimenet megfelelő, mehet a következő lépésre.
+    /// The output is acceptable, proceed to the next step.
     /// </summary>
     Accept,
 
     /// <summary>
-    /// Human szerkesztette a kimenetet, majd továbbadja.
+    /// The human edited the output, then it is passed on.
     /// </summary>
     Edit,
 
     /// <summary>
-    /// Visszaküldés az AI-nak ugyanezen a lépésen belül.
-    /// Új iteráció indul: eredeti kontextus + elutasított kimenet + pontosítás.
+    /// Sent back to the AI within the same step.
+    /// A new iteration starts: original context + rejected output + clarification.
     /// </summary>
     Reject
 }

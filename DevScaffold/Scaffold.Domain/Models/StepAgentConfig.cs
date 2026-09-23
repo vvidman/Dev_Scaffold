@@ -19,44 +19,44 @@
 namespace Scaffold.Domain.Models;
 
 /// <summary>
-/// Egy AI agent step konfigurációja.
-/// A pipeline steps[].config mezője által hivatkozott yaml fájl tartalma.
-/// Meghatározza az agent rendszer promptját és az elvárt kimenet formátumát.
+/// Configuration of a single AI agent step.
+/// The content of the yaml file referenced by the pipeline's steps[].config field.
+/// Defines the agent's system prompt and the expected output format.
 /// </summary>
 public class StepAgentConfig
 {
     public string OutputFormat { get; init; } = "markdown";
 
     /// <summary>
-    /// A lépés azonosítója. Az output mappa nevét és az eseményeket is ez határozza meg.
+    /// The step's identifier. Also determines the output folder name and the event names.
     /// </summary>
     public required string Step { get; init; }
 
     /// <summary>
-    /// Az AI rendszer promptja erre a lépésre.
-    /// Meghatározza az AI szerepét és viselkedési szabályait.
+    /// The AI system prompt for this step.
+    /// Defines the AI's role and behavioral rules.
     /// </summary>
     public required string SystemPrompt { get; init; }
 
     /// <summary>
-    /// Maximálisan generálható tokenek száma.
-    /// Védelmet nyújt a repetition loop ellen.
+    /// Maximum number of tokens that may be generated.
+    /// Protects against repetition loops.
     ///
-    /// Ajánlott értékek:
+    /// Recommended values:
     ///   task_breakdown:  800–1200
     ///   code_generation: 2000–4000
     ///   code_review:     1000–2000
     ///   documentation:   1500–2500
     ///
-    /// Ha nincs megadva (null), a backend alapértelmezése érvényes.
+    /// If not set (null), the backend's default applies.
     /// </summary>
     public int? MaxTokens { get; init; }
 
     /// <summary>
-    /// A code blockokban használt fájlútvonal hint prefix.
-    /// Pl. "// filepath:" – az IMarkdownArtifactExtractor ezt keresi.
-    /// Ha null, az extractor fallback névgenerálást használ.
-    /// Csak artifact-generáló stepeknél szükséges (pl. coding, test_generation).
+    /// The filepath hint prefix used in code blocks.
+    /// E.g. "// filepath:" – this is what IMarkdownArtifactExtractor looks for.
+    /// If null, the extractor falls back to generated names.
+    /// Only needed for artifact-generating steps (e.g. coding, test_generation).
     /// </summary>
     public string? FilepathHintPrefix { get; init; }
 }

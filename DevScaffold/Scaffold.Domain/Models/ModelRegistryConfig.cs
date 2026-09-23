@@ -19,23 +19,23 @@
 namespace Scaffold.Domain.Models;
 
 /// <summary>
-/// A models.yaml gyökér objektuma.
-/// Alias → ModelConfig mapping tárolója.
+/// Root object of models.yaml.
+/// Stores the alias → ModelConfig mapping.
 /// </summary>
 public class ModelRegistryConfig
 {
     public Dictionary<string, ModelConfig> Models { get; init; } = [];
 
     /// <summary>
-    /// Alias alapján feloldja a ModelConfig-ot.
+    /// Resolves a ModelConfig by alias.
     /// </summary>
-    /// <exception cref="KeyNotFoundException">Ha az alias nem található.</exception>
+    /// <exception cref="KeyNotFoundException">If the alias is not found.</exception>
     public ModelConfig Resolve(string alias)
     {
         if (!Models.TryGetValue(alias, out var config))
             throw new KeyNotFoundException(
-                $"Ismeretlen modell alias: '{alias}'. " +
-                $"Elérhető aliasok: {string.Join(", ", Models.Keys)}");
+                $"Unknown model alias: '{alias}'. " +
+                $"Available aliases: {string.Join(", ", Models.Keys)}");
 
         return config;
     }

@@ -19,55 +19,55 @@
 namespace Scaffold.Domain.Models;
 
 /// <summary>
-/// Egy modell konfigurációja a models.yaml-ban.
-/// Az alias → ModelConfig mapping értéke.
+/// A single model's configuration in models.yaml.
+/// The value of the alias → ModelConfig mapping.
 ///
-/// Kétféle backend konfigurálható:
+/// Two kinds of backend can be configured:
 ///
-/// Lokális GGUF modell:
+/// Local GGUF model:
 ///   path:         /models/qwen-coder-7b.gguf
 ///   context_size: 8192
 ///   gpu_layers:   32
 ///
-/// Online API (OpenAI-kompatibilis):
+/// Online API (OpenAI-compatible):
 ///   path:       https://api.openai.com/v1/chat/completions
 ///   model_name: gpt-4o
-///   api_key:    OPENAI_API_KEY   ← environment variable neve, nem maga a kulcs
+///   api_key:    OPENAI_API_KEY   ← name of the environment variable, not the key itself
 ///
-/// A ServiceHost a path alapján dönti el melyik backend típust használja:
-/// - .gguf kiterjesztés → LlamaInferenceBackend
-/// - http:// vagy https:// → ApiInferenceBackend
+/// The ServiceHost decides which backend type to use based on the path:
+/// - .gguf extension → LlamaInferenceBackend
+/// - http:// or https:// → ApiInferenceBackend
 /// </summary>
 public class ModelConfig
 {
     /// <summary>
-    /// Lokális modellnél: GGUF fájl elérési útja.
-    /// API modelleknél: a /v1/chat/completions végpont URL-je.
+    /// For local models: the path to the GGUF file.
+    /// For API models: the URL of the /v1/chat/completions endpoint.
     /// </summary>
     public string Path { get; init; } = string.Empty;
 
     /// <summary>
-    /// LLamaSharp context mérete tokenekben.
-    /// Csak lokális modelleknél használt, API modelleknél figyelmen kívül hagyva.
+    /// LLamaSharp context size in tokens.
+    /// Only used for local models, ignored for API models.
     /// </summary>
     public int ContextSize { get; init; } = 4096;
 
     /// <summary>
-    /// GPU-ra töltendő rétegek száma. 0 = CPU-only.
-    /// Csak lokális modelleknél használt, API modelleknél figyelmen kívül hagyva.
+    /// Number of layers to offload to the GPU. 0 = CPU-only.
+    /// Only used for local models, ignored for API models.
     /// </summary>
     public int GpuLayers { get; init; } = 0;
 
     /// <summary>
-    /// Az API hívásban a "model" mező értéke. Pl. "gpt-4o", "claude-3-5-sonnet-20241022".
-    /// Csak API modelleknél szükséges, lokális modelleknél figyelmen kívül hagyva.
+    /// The value of the "model" field in the API call. E.g. "gpt-4o", "claude-3-5-sonnet-20241022".
+    /// Only needed for API models, ignored for local models.
     /// </summary>
     public string? ModelName { get; init; }
 
     /// <summary>
-    /// Az API kulcsot tartalmazó environment variable neve. Pl. "OPENAI_API_KEY".
-    /// Maga a kulcs értéke NEM kerül ide – csak a változó neve.
-    /// Csak API modelleknél szükséges, lokális modelleknél figyelmen kívül hagyva.
+    /// The name of the environment variable holding the API key. E.g. "OPENAI_API_KEY".
+    /// The key value itself is NOT stored here – only the variable name.
+    /// Only needed for API models, ignored for local models.
     /// </summary>
     public string? ApiKey { get; init; }
 }

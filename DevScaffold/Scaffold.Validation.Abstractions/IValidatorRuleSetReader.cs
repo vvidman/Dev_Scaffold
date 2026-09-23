@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -19,22 +19,22 @@
 namespace Scaffold.Validation.Abstractions;
 
 /// <summary>
-/// Egy step-hez tartozó deklaratív validátor szabálykészlet betöltése.
+/// Loads the declarative validator rule set that belongs to a step.
 ///
-/// Az implementáció felelős a fájl elérési út feloldásáért is –
-/// a hívónak nem kell ismernie a fájlnév-konvenciót.
+/// The implementation is also responsible for resolving the file path –
+/// the caller does not need to know the filename convention.
 ///
-/// Ha nem létezik validator yaml a megadott step-hez, null-t ad vissza.
-/// Ez nem hiba – a per-step validator ilyenkor beégetett alapértelmezett
-/// szabályokkal fut.
+/// If no validator yaml exists for the given step, returns null.
+/// This is not an error – the per-step validator then runs with its
+/// built-in default rules.
 /// </summary>
 public interface IValidatorRuleSetReader
 {
     /// <summary>
-    /// Megkísérli betölteni a stephez tartozó validator szabálykészletet.
+    /// Attempts to load the validator rule set that belongs to the step.
     /// </summary>
-    /// <param name="stepConfigPath">A step agent config fájl teljes elérési útja.</param>
-    /// <param name="stepId">A step azonosítója (pl. "task_breakdown").</param>
-    /// <returns>A betöltött szabálykészlet, vagy null ha nem létezik validator yaml.</returns>
+    /// <param name="stepConfigPath">Full path to the step agent config file.</param>
+    /// <param name="stepId">The step's identifier (e.g. "task_breakdown").</param>
+    /// <returns>The loaded rule set, or null if no validator yaml exists.</returns>
     ValidatorRuleSet? TryLoad(string stepConfigPath, string stepId);
 }

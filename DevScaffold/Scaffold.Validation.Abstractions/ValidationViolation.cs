@@ -25,13 +25,13 @@ public enum ViolationSeverity
 }
 
 /// <summary>
-/// Egyetlen validációs szabálysértés leírása.
+/// Description of a single validation rule violation.
 /// </summary>
-/// <param name="RuleId">Gépileg olvasható azonosító, pl. "STOP_TOKEN_LEAKED".</param>
-/// <param name="Layer">Honnan érkezett: "Universal" vagy "StepSpecific".</param>
-/// <param name="Description">Ember-olvasható leírás.</param>
-/// <param name="Severity">Error = auto-reject; Warning = human elé kerül kiemelve.</param>
-/// <param name="FixHint">Opcionális: error-driven refinement promptba kerül Error esetén.</param>
+/// <param name="RuleId">Machine-readable identifier, e.g. "STOP_TOKEN_LEAKED".</param>
+/// <param name="Layer">Where it came from: "Universal" or "StepSpecific".</param>
+/// <param name="Description">Human-readable description.</param>
+/// <param name="Severity">Error = auto-reject; Warning = surfaced to the human.</param>
+/// <param name="FixHint">Optional: included in the error-driven refinement prompt on Error.</param>
 public record ValidationViolation(
     string RuleId,
     string Layer,

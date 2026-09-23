@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -19,18 +19,18 @@
 namespace Scaffold.Validation.Abstractions;
 
 /// <summary>
-/// Per-step validációs logika.
-/// Minden step típushoz egy dedikált implementáció készül.
-/// Ha egy step_id-hoz nincs regisztrált validator, csak az UniversalOutputValidator fut.
+/// Per-step validation logic.
+/// A dedicated implementation is written for each step type.
+/// If no validator is registered for a given step_id, only UniversalOutputValidator runs.
 /// </summary>
 public interface IStepOutputValidator
 {
-    /// <summary>Egyeznie kell a step agent config step mezőjével.</summary>
+    /// <summary>Must match the step field of the step agent config.</summary>
     string StepId { get; }
 
     /// <summary>
-    /// Step-specifikus ellenőrzések futtatása.
-    /// Csak a saját step-re vonatkozó violation-öket adja vissza.
+    /// Runs step-specific checks.
+    /// Returns only the violations relevant to its own step.
     /// </summary>
     IReadOnlyList<ValidationViolation> Validate(
         string outputContent,

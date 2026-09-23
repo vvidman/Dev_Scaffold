@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -19,12 +19,12 @@
 namespace Scaffold.Validation.Abstractions;
 
 /// <summary>
-/// Deklaratív validációs szabálykészlet, yaml fájlból töltve.
-/// A kódban lévő per-step logikát egészíti ki – nem helyettesíti.
+/// Declarative validation rule set, loaded from a yaml file.
+/// Complements the per-step logic in code – does not replace it.
 /// </summary>
 public class ValidatorRuleSet
 {
-    /// <summary>A step azonosítója – egyeznie kell a step agent config step mezőjével.</summary>
+    /// <summary>The step's identifier – must match the step field of the step agent config.</summary>
     public string Step { get; init; } = string.Empty;
 
     public ValidatorRules Rules { get; init; } = new();
@@ -32,22 +32,22 @@ public class ValidatorRuleSet
 
 public class ValidatorRules
 {
-    /// <summary>Mezők amiknek minden taskban szerepelniük kell.</summary>
+    /// <summary>Fields that must be present in every task.</summary>
     public List<string> RequiredFields { get; init; } = [];
 
-    /// <summary>Task count korlátok.</summary>
+    /// <summary>Task count constraints.</summary>
     public TaskCountConstraint? TaskCount { get; init; }
 
-    /// <summary>Szavak/kifejezések amik jelenléte constraint-sértést jelez.</summary>
+    /// <summary>Words/phrases whose presence signals a constraint violation.</summary>
     public List<string> ForbiddenKeywords { get; init; } = [];
 
-    /// <summary>Fájlok amik nem szerepelhetnek "Affected files" alatt. (opcionális)</summary>
+    /// <summary>Files that may not appear under "Affected files". (optional)</summary>
     public List<string> ForbiddenAffectedFiles { get; init; } = [];
 
-    /// <summary>Figyelmeztetők (Warning – nem auto-reject, human elé kerül) (opcionális)</summary>
+    /// <summary>Warning triggers (Warning – not auto-reject, surfaced to the human). (optional)</summary>
     public List<string> WarningKeywords { get; init; } = [];
 
-    /// <summary>Elvárt mező-sorrend (opcionális).</summary>
+    /// <summary>Expected field order. (optional)</summary>
     public List<string> FieldOrder { get; init; } = [];
 }
 

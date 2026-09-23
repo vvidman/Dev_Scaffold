@@ -1,4 +1,4 @@
-﻿/*
+/*
 
    Copyright 2026 Viktor Vidman
 
@@ -19,19 +19,19 @@
 namespace Scaffold.Validation.Abstractions;
 
 /// <summary>
-/// Egy step kimenetének validálása.
-/// Az implementáció az univerzális és a per-step ellenőrzéseket kombinálja.
+/// Validates a step's output.
+/// The implementation combines the universal and the per-step checks.
 /// </summary>
 public interface IOutputValidator
 {
     /// <summary>
-    /// Validálja a step kimenetét.
+    /// Validates the step's output.
     /// </summary>
-    /// <param name="outputContent">A generált kimenet teljes szöveges tartalma.</param>
-    /// <param name="stepId">A step azonosítója (pl. "task_breakdown").</param>
-    /// <param name="maxTokensConfigured">A step agent configban megadott max_tokens érték.</param>
-    /// <param name="tokensGenerated">Ténylegesen generált tokenek száma.</param>
-    /// <param name="ruleSet">Opcionális yaml-ból töltött deklaratív szabálykészlet.</param>
+    /// <param name="outputContent">The full text content of the generated output.</param>
+    /// <param name="stepId">The step's identifier (e.g. "task_breakdown").</param>
+    /// <param name="maxTokensConfigured">The max_tokens value configured in the step agent config.</param>
+    /// <param name="tokensGenerated">The number of tokens actually generated.</param>
+    /// <param name="ruleSet">Optional declarative rule set loaded from yaml.</param>
     OutputValidationResult Validate(
         string outputContent,
         string stepId,

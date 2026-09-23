@@ -19,9 +19,9 @@
 namespace Scaffold.Validation.Abstractions;
 
 /// <summary>
-/// Egy validációs futás összesített eredménye.
-/// Passed = true csak akkor, ha nincs Error súlyosságú violation.
-/// Warning-ok jelenléte nem akadályozza meg a human validációt.
+/// The aggregated result of a single validation run.
+/// Passed = true only if there is no Error-severity violation.
+/// The presence of warnings does not block human validation.
 /// </summary>
 public record OutputValidationResult(
     bool Passed,

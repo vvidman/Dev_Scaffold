@@ -21,15 +21,15 @@ using System.Text;
 namespace Scaffold.ServiceHost;
 
 /// <summary>
-/// TextWriter decorator ami megszámolja a backend WriteAsync hívásait.
-/// Minden nem-üres WriteAsync hívás egy tokennek számít – ez közelítő érték,
-/// de elegendő a tok/s kijelzéséhez.
+/// TextWriter decorator that counts the backend's WriteAsync calls.
+/// Every non-empty WriteAsync call counts as one token – this is an
+/// approximation, but good enough to display tok/s.
 ///
-/// Thread-safe: Interlocked.Increment biztosítja a számlálót,
-/// az összes többi hívás az inner writer-re delegál.
+/// Thread-safe: Interlocked.Increment guards the counter,
+/// every other call delegates to the inner writer.
 ///
-/// A Dispose nem zárja be az inner writert – az életciklus kezelése
-/// a hívó felelőssége.
+/// Dispose does not close the inner writer – lifecycle management
+/// is the caller's responsibility.
 /// </summary>
 internal sealed class CountingTextWriter : TextWriter
 {
@@ -61,6 +61,6 @@ internal sealed class CountingTextWriter : TextWriter
     public override Task FlushAsync(CancellationToken cancellationToken) =>
         _inner.FlushAsync(cancellationToken);
 
-    // Dispose nem zárja be az inner writert – az InferenceWorker kezeli
+    // Dispose does not close the inner writer – InferenceWorker manages it
     protected override void Dispose(bool disposing) { }
 }

@@ -23,19 +23,19 @@ using Scaffold.ServiceHost.InferenceImpl;
 namespace Scaffold.ServiceHost;
 
 /// <summary>
-/// Az alapértelmezett backend factory implementáció.
+/// The default backend factory implementation.
 ///
-/// Két backend típust kezel a modell config path-ja alapján:
-/// - http:// vagy https:// prefix → ApiInferenceBackend (azonnali init)
-/// - egyéb (fájl path) → LlamaInferenceBackend (GGUF betöltés, időigényes)
+/// Handles two backend types based on the model config's path:
+/// - http:// or https:// prefix → ApiInferenceBackend (instant init)
+/// - anything else (file path) → LlamaInferenceBackend (GGUF loading, time-consuming)
 ///
-/// A HttpClient itt él – egyetlen megosztott példány az összes
-/// ApiInferenceBackend számára a ServiceHost élettartama alatt.
+/// The HttpClient lives here – a single shared instance for all
+/// ApiInferenceBackends for the lifetime of the ServiceHost.
 /// </summary>
 public sealed class DefaultInferenceBackendFactory : IInferenceBackendFactory, IDisposable
 {
-    // Megosztott HttpClient az összes ApiInferenceBackend számára.
-    // A factory élettartamához kötött – a ModelCache-ből ide került.
+    // Shared HttpClient for all ApiInferenceBackends.
+    // Bound to the factory's lifetime – moved here from ModelCache.
     private readonly HttpClient _httpClient = new();
     private bool _disposed;
 

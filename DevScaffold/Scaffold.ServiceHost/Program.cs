@@ -24,12 +24,12 @@ using Scaffold.ServiceHost.Abstractions;
 // ─────────────────────────────────────────────
 // Scaffold ServiceHost
 //
-// Használat (a CLI indítja, nem kézzel):
+// Usage (started by the CLI, not by hand):
 //   Scaffold.ServiceHost --models    <models.yaml>
-//                        --output    <output mappa>
-//                        --pipe-name <pipe név>
+//                        --output    <output folder>
+//                        --pipe-name <pipe name>
 //
-// Minden paramétert a CLI ad át indításkor.
+// The CLI passes every parameter at startup.
 // ─────────────────────────────────────────────
 
 var inputArgs = ParseArgs(Environment.GetCommandLineArgs()[1..]);
@@ -42,24 +42,24 @@ var outputBasePath = inputArgs["--output"];
 var pipeName = inputArgs["--pipe-name"];
 var version = "1.0.0";
 
-Console.WriteLine("[ServiceHost] Indítás...");
-Console.WriteLine($"[ServiceHost] Pipe neve: {pipeName}");
+Console.WriteLine("[ServiceHost] Starting...");
+Console.WriteLine($"[ServiceHost] Pipe name: {pipeName}");
 Console.WriteLine($"[ServiceHost] Models:    {modelsYamlPath}");
 Console.WriteLine($"[ServiceHost] Output:    {outputBasePath}");
 Console.WriteLine();
 
-// Graceful shutdown – Ctrl+C vagy SIGTERM esetén
+// Graceful shutdown – on Ctrl+C or SIGTERM
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {
     e.Cancel = true;
-    Console.WriteLine("[ServiceHost] Leállítás jelzése...");
+    Console.WriteLine("[ServiceHost] Shutdown signalled...");
     cts.Cancel();
 };
 AppDomain.CurrentDomain.ProcessExit += (_, _) => cts.Cancel();
 
 // ─────────────────────────────────────────────
-// Komponensek összerakása
+// Assembling the components
 // ─────────────────────────────────────────────
 
 ModelRegistryConfig registry;
@@ -68,26 +68,26 @@ try
     var registryReader = new YamlModelRegistryReader();
     registry = registryReader.Load(modelsYamlPath);
     Console.WriteLine(
-        $"[ServiceHost] Modell registry betöltve. " +
-        $"Elérhető aliasok: {string.Join(", ", registry.Models.Keys)}");
+        $"[ServiceHost] Model registry loaded. " +
+        $"Available aliases: {string.Join(", ", registry.Models.Keys)}");
 }
 catch (Exception ex)
 {
     Console.Error.WriteLine(
-        $"[ServiceHost ERROR] Models registry betöltési hiba: {ex.Message}");
+        $"[ServiceHost ERROR] Models registry load error: {ex.Message}");
     return 1;
 }
 
-// EventPublisher – event pipe írás
+// EventPublisher – writes to the event pipe
 await using var eventPublisher = new EventPublisher(pipeName);
 
-// InferenceBackendFactory – backend példányosítás (LLamaSharp vagy API döntés)
+// InferenceBackendFactory – backend instantiation (LLamaSharp vs. API decision)
 using var backendFactory = new DefaultInferenceBackendFactory();
 
-// ModelCache – lazy backend betöltés
+// ModelCache – lazy backend loading
 await using var modelCache = new ModelCache(registry, backendFactory);
 
-// ModelCache eseményeket bekötjük az EventPublisher-be
+// Wire the ModelCache events into the EventPublisher
 modelCache.ModelStatusChanged += async (alias, status, message) =>
 {
     await eventPublisher.PublishModelStatusChangedAsync(
@@ -98,13 +98,13 @@ modelCache.ModelStatusChanged += async (alias, status, message) =>
         ct: cts.Token);
 };
 
-// InferenceWorker – inference futtatás backend-agnosztikusan
+// InferenceWorker – runs inference backend-agnostically
 var inferenceWorker = new InferenceWorker(
     modelCache,
     eventPublisher,
     outputBasePath);
 
-// CommandDispatcher – parancs routing
+// CommandDispatcher – command routing
 var dispatcher = new CommandDispatcher(
     inferenceWorker,
     modelCache,
@@ -119,29 +119,29 @@ await using var pipeServer = new PipeServer(
     version);
 
 // ─────────────────────────────────────────────
-// Indítás
+// Startup
 // ─────────────────────────────────────────────
 
 try
 {
     await pipeServer.RunAsync(cts.Token);
-    Console.WriteLine("[ServiceHost] Normál leállás.");
+    Console.WriteLine("[ServiceHost] Normal shutdown.");
     return 0;
 }
 catch (OperationCanceledException)
 {
-    Console.WriteLine("[ServiceHost] Megszakítva.");
+    Console.WriteLine("[ServiceHost] Cancelled.");
     return 0;
 }
 catch (Exception ex)
 {
-    Console.Error.WriteLine($"[ServiceHost ERROR] Váratlan hiba: {ex.Message}");
+    Console.Error.WriteLine($"[ServiceHost ERROR] Unexpected error: {ex.Message}");
     Console.Error.WriteLine(ex.StackTrace);
     return 1;
 }
 
 // ─────────────────────────────────────────────
-// Segédfüggvények
+// Helper functions
 // ─────────────────────────────────────────────
 
 static Dictionary<string, string> ParseArgs(string[] args)
@@ -165,6 +165,6 @@ static bool ValidateRequiredArgs(Dictionary<string, string> args)
     if (missing.Count == 0) return true;
 
     Console.Error.WriteLine(
-        $"[ServiceHost ERROR] Hiányzó argumentumok: {string.Join(", ", missing)}");
+        $"[ServiceHost ERROR] Missing arguments: {string.Join(", ", missing)}");
     return false;
 }

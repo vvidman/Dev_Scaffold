@@ -27,12 +27,12 @@ using Scaffold.ServiceHost.Abstractions;
 namespace Scaffold.ServiceHost;
 
 /// <summary>
-/// OpenAI-kompatibilis API inference backend.
-/// SSE streaming-et használ (stream: true).
+/// OpenAI-compatible API inference backend.
+/// Uses SSE streaming (stream: true).
 ///
-/// MaxTokens kezelés:
-/// - Ha az InferRequest.MaxTokens > 0, bekerül a request body-ba (max_tokens mező).
-/// - Ha 0, a mező kimarad – az API provider alapértelmezése érvényes.
+/// MaxTokens handling:
+/// - If InferRequest.MaxTokens > 0, it goes into the request body (max_tokens field).
+/// - If 0, the field is omitted – the API provider's default applies.
 /// </summary>
 internal sealed class ApiInferenceBackend : IInferenceBackend
 {
@@ -104,7 +104,7 @@ internal sealed class ApiInferenceBackend : IInferenceBackend
     }
 
     // ─────────────────────────────────────────────
-    // Request body összerakása
+    // Assembling the request body
     // ─────────────────────────────────────────────
 
     private object BuildRequestBody(InferRequest request)
@@ -120,8 +120,8 @@ internal sealed class ApiInferenceBackend : IInferenceBackend
             ]
         };
 
-        // MaxTokens csak akkor kerül a requestbe ha explicit meg van adva.
-        // 0 = nincs limit (proto default érték).
+        // MaxTokens only goes into the request if explicitly set.
+        // 0 = no limit (proto default value).
         if (request.MaxTokens > 0)
             body.MaxTokens = (int)request.MaxTokens;
 
@@ -133,12 +133,12 @@ internal sealed class ApiInferenceBackend : IInferenceBackend
         if (string.IsNullOrEmpty(_config.ApiKey))
             return null;
 
-        // ApiKey az env var neve, nem maga a kulcs
+        // ApiKey is the env var's name, not the key itself
         return Environment.GetEnvironmentVariable(_config.ApiKey);
     }
 
     // ─────────────────────────────────────────────
-    // JSON modellek
+    // JSON models
     // ─────────────────────────────────────────────
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -153,7 +153,7 @@ internal sealed class ApiInferenceBackend : IInferenceBackend
         public bool Stream { get; set; }
         public List<Message> Messages { get; set; } = [];
 
-        // Null ha nincs megadva – JsonIgnoreCondition.WhenWritingNull kihagyja
+        // Null if not set – JsonIgnoreCondition.WhenWritingNull omits it
         public int? MaxTokens { get; set; }
     }
 

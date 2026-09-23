@@ -24,15 +24,15 @@ using Scaffold.Agent.Protocol;
 namespace Scaffold.ServiceHost;
 
 /// <summary>
-/// Az event pipe-ra ír EventEnvelope üzeneteket.
-/// A ServiceHost minden kimenő eseménye ezen keresztül jut el a CLI-hez.
+/// Writes EventEnvelope messages to the event pipe.
+/// Every outgoing ServiceHost event reaches the CLI through this.
 ///
-/// Thread-safe: a _lock biztosítja hogy egyszerre csak egy esemény
-/// kerül a pipe-ra – párhuzamos inference progress és modell események
-/// esetén sem keverednek az üzenetek.
+/// Thread-safe: _lock ensures only one event goes onto the pipe at a
+/// time – messages don't get interleaved even with concurrent
+/// inference progress and model events.
 ///
-/// Multi-session: a ResetForNewConnectionAsync új pipe instance-t hoz létre
-/// miután a CLI kilépett, így a következő CLI session csatlakozhat.
+/// Multi-session: ResetForNewConnectionAsync creates a new pipe instance
+/// after the CLI exits, so the next CLI session can connect.
 /// </summary>
 public class EventPublisher : IEventPublisher, IPipeConnectionLifecycle, IAsyncDisposable
 {
@@ -55,8 +55,8 @@ public class EventPublisher : IEventPublisher, IPipeConnectionLifecycle, IAsyncD
         options: PipeOptions.Asynchronous);
 
     /// <summary>
-    /// Megvárja hogy a CLI kliens csatlakozzon az event pipe-ra.
-    /// A ServiceHost a ready esemény előtt hívja ezt.
+    /// Waits for the CLI client to connect to the event pipe.
+    /// The ServiceHost calls this before the ready event.
     /// </summary>
     public async Task WaitForConnectionAsync(CancellationToken cancellationToken = default)
     {
@@ -64,8 +64,8 @@ public class EventPublisher : IEventPublisher, IPipeConnectionLifecycle, IAsyncD
     }
 
     /// <summary>
-    /// Az előző CLI session pipe-ját elveti és újat nyit.
-    /// A PipeServer hívja mielőtt a következő CLI kapcsolatot várja.
+    /// Discards the previous CLI session's pipe and opens a new one.
+    /// Called by PipeServer before it waits for the next CLI connection.
     /// </summary>
     public async Task ResetForNewConnectionAsync(CancellationToken cancellationToken = default)
     {
@@ -75,7 +75,7 @@ public class EventPublisher : IEventPublisher, IPipeConnectionLifecycle, IAsyncD
         try
         {
             try { await _pipe.DisposeAsync(); }
-            catch (IOException) { /* már lezárt pipe – normál eset */ }
+            catch (IOException) { /* pipe already closed – normal case */ }
 
             _pipe = CreatePipe();
         }
@@ -86,8 +86,8 @@ public class EventPublisher : IEventPublisher, IPipeConnectionLifecycle, IAsyncD
     }
 
     /// <summary>
-    /// Elküldi az EventEnvelope-ot a CLI-nek.
-    /// WriteDelimitedTo gondoskodik a hossz prefix framing-ről.
+    /// Sends the EventEnvelope to the CLI.
+    /// WriteDelimitedTo handles the length-prefix framing.
     /// </summary>
     public async Task PublishAsync(
         EventEnvelope envelope,
@@ -98,7 +98,7 @@ public class EventPublisher : IEventPublisher, IPipeConnectionLifecycle, IAsyncD
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            // WriteDelimitedTo = varint hossz prefix + protobuf bináris adat
+            // WriteDelimitedTo = varint length prefix + protobuf binary data
             envelope.WriteDelimitedTo(_pipe);
             await _pipe.FlushAsync(cancellationToken);
         }
@@ -109,7 +109,7 @@ public class EventPublisher : IEventPublisher, IPipeConnectionLifecycle, IAsyncD
     }
 
     // ─────────────────────────────────────────────
-    // Gyártó metódusok – az összes esemény típushoz
+    // Factory methods – for every event type
     // ─────────────────────────────────────────────
 
     public Task PublishServiceReadyAsync(string version, CancellationToken ct = default) =>
@@ -268,6 +268,6 @@ public class EventPublisher : IEventPublisher, IPipeConnectionLifecycle, IAsyncD
         _disposed = true;
         _lock.Dispose();
         try { await _pipe.DisposeAsync(); }
-        catch (IOException) { /* már bontott pipe – normál eset */ }
+        catch (IOException) { /* pipe already torn down – normal case */ }
     }
 }

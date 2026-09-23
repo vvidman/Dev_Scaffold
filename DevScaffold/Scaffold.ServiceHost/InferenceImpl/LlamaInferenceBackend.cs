@@ -26,33 +26,33 @@ using Scaffold.ServiceHost.Abstractions;
 namespace Scaffold.ServiceHost.InferenceImpl;
 
 /// <summary>
-/// Executor mód kiválasztása a LlamaInferenceBackend-hez.
+/// Executor mode selection for LlamaInferenceBackend.
 /// </summary>
 public enum LlamaExecutorMode
 {
     /// <summary>
-    /// Minden hívás önálló, nincs conversation history.
-    /// Scaffold step inference-hez ez az alapértelmezett.
+    /// Every call is independent, no conversation history.
+    /// The default for Scaffold step inference.
     /// </summary>
     Stateless,
 
     /// <summary>
-    /// Multi-turn párbeszéd – a context megőrzi a conversation history-t.
-    /// Jövőbeli multi-turn step támogatáshoz.
+    /// Multi-turn conversation – the context retains conversation history.
+    /// For future multi-turn step support.
     /// </summary>
     Interactive
 }
 
 /// <summary>
-/// LLamaSharp alapú offline inference backend.
-/// GGUF formátumú modell fájlból dolgozik, nincs hálózati függőség.
+/// LLamaSharp-based offline inference backend.
+/// Works from a GGUF-format model file, no network dependency.
 ///
-/// Két executor mód támogatott:
-/// - Stateless:   minden RunAsync hívás tiszta kontextusból indul (nincs állapot-akkumuláció)
-/// - Interactive: a _context megőrzi a conversation history-t futások között
+/// Two executor modes are supported:
+/// - Stateless:   every RunAsync call starts from a clean context (no state accumulation)
+/// - Interactive: _context retains conversation history across runs
 ///
-/// A ModelCache a LoadStatelessAsync / LoadInteractiveAsync factory metódusokkal
-/// hozza létre a megfelelő módú backendet.
+/// ModelCache creates the backend in the right mode via the
+/// LoadStatelessAsync / LoadInteractiveAsync factory methods.
 /// </summary>
 internal sealed class LlamaInferenceBackend : IInferenceBackend
 {
@@ -78,12 +78,12 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
     }
 
     // ─────────────────────────────────────────────
-    // Factory metódusok
+    // Factory methods
     // ─────────────────────────────────────────────
 
     /// <summary>
-    /// Stateless executor – minden inference önálló, nincs állapot-akkumuláció.
-    /// Scaffold step inference-hez ez az alapértelmezett.
+    /// Stateless executor – every inference is independent, no state accumulation.
+    /// The default for Scaffold step inference.
     /// </summary>
     public static Task<LlamaInferenceBackend> LoadStatelessAsync(
         ModelConfig config,
@@ -91,7 +91,7 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
         LoadAsync(config, LlamaExecutorMode.Stateless, cancellationToken);
 
     /// <summary>
-    /// Interactive executor – multi-turn párbeszéd, context megőrzi a history-t.
+    /// Interactive executor – multi-turn conversation, context retains history.
     /// </summary>
     public static Task<LlamaInferenceBackend> LoadInteractiveAsync(
         ModelConfig config,
@@ -99,7 +99,7 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
         LoadAsync(config, LlamaExecutorMode.Interactive, cancellationToken);
 
     // ─────────────────────────────────────────────
-    // IInferenceBackend implementáció
+    // IInferenceBackend implementation
     // ─────────────────────────────────────────────
 
     /// <inheritdoc />
@@ -139,19 +139,19 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
         //}
 
         uint tokenCount = 0;
-        // Érdemes egy belső listát tartani a lehetséges lezárókról
+        // Keep the list of possible stop sequences handy
         var stopSequences = inferenceParams.AntiPrompts;
 
         await foreach (var token in executor.InferAsync(prompt, inferenceParams, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Megnézzük, hogy a jelenlegi token tartalmazza-e valamelyik tiltott szekvenciát
+            // Check whether the current token contains one of the forbidden sequences
             var foundStopSequence = stopSequences.FirstOrDefault(s => token.Contains(s));
 
             if (foundStopSequence != null)
             {
-                // Ha benne van, csak a lezáró jel ELŐTTI részt írjuk ki
+                // If it does, only write out the part BEFORE the stop sequence
                 var index = token.IndexOf(foundStopSequence);
                 if (index > 0)
                 {
@@ -159,11 +159,11 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
                     await writer.WriteAsync(cleanPart);
                 }
 
-                // Itt megállunk, a meta-token többi része (vagy egésze) nem kerül a kimenetre
+                // Stop here – the rest of the meta-token (or all of it) is not written to the output
                 break;
             }
 
-            // Ha nincs benne lezáró, mehet ki a teljes token
+            // If there is no stop sequence, write out the full token
             await writer.WriteAsync(token);
             await writer.FlushAsync(cancellationToken);
             tokenCount++;
@@ -184,7 +184,7 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
     }
 
     // ─────────────────────────────────────────────
-    // Privát implementáció
+    // Private implementation
     // ─────────────────────────────────────────────
 
     private ILLamaExecutor CreateExecutor() => _executorMode switch
@@ -192,7 +192,7 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
         LlamaExecutorMode.Stateless => new StatelessExecutor(_weights, _params),
         LlamaExecutorMode.Interactive => new InteractiveExecutor(_context),
         _ => throw new ArgumentOutOfRangeException(
-            nameof(_executorMode), _executorMode, "Ismeretlen executor mód.")
+            nameof(_executorMode), _executorMode, "Unknown executor mode.")
     };
 
     private static async Task<LlamaInferenceBackend> LoadAsync(
@@ -202,7 +202,7 @@ internal sealed class LlamaInferenceBackend : IInferenceBackend
     {
         if (!File.Exists(config.Path))
             throw new FileNotFoundException(
-                $"Modell fájl nem található: {config.Path}");
+                $"Model file not found: {config.Path}");
 
         var parameters = new ModelParams(config.Path)
         {

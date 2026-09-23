@@ -1,7 +1,7 @@
 # ADR – Scaffold ServiceHost
 
 **Date:** 2026-03-06
-**Updated:** 2026-03-22
+**Updated:** 2026-09-23
 **Status:** Accepted
 **Affected projects:** Scaffold.ServiceHost, Scaffold.ServiceHost.Abstractions
 
@@ -141,6 +141,13 @@ _dictionaryLock → cache hit? → return
 - `CancelInferRequest` can only arrive if the command loop is running — so the command loop must not be blocked
 - `InferenceWorker` sends `InferenceCompletedEvent` / `InferenceFailedEvent` itself
 
+**Failure path:** The background task is fire-and-forget, but not unobserved.
+`RunInferenceObservedAsync` converts every escaping exception (including the
+"inference already running" rejection) into an `InferenceFailedEvent`, so the
+CLI always receives a terminal event for its `request_id`. As a second line of
+defense, the CLI applies a liveness timeout (3 × progress interval) and fails
+the step instead of waiting forever if the ServiceHost goes silent.
+
 ---
 
 ### 10. `InferenceWorker` — `SemaphoreSlim` to limit concurrent inference
@@ -228,5 +235,5 @@ ServiceHost internal components communicate through interfaces — concrete impl
 
 ## Related ADRs
 
-- **ADR-CLI-Refactor** — The thin client decision, which defines when the ServiceHost starts and stops, and that the CLI determines the output folder structure
-- **ADR-Protocol** — The `InferRequest.output_folder` field rationale
+- **[ADR-CLI](../Scaffold.CLI/ADR-CLI.md)** — The thin client decision, which defines when the ServiceHost starts and stops, and that the CLI determines the output folder structure
+- **[ADR-Protocol](../Scaffold.Agent.Protocol/ADR-Protocol.md)** — The `InferRequest.output_folder` field rationale

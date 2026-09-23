@@ -24,30 +24,30 @@ using Scaffold.ServiceHost.Abstractions;
 namespace Scaffold.ServiceHost;
 
 /// <summary>
-/// Named Pipe szerver életciklus kezelés.
+/// Named Pipe server lifecycle management.
 ///
-/// Két egyirányú pipe:
-/// - command pipe: CLI → ServiceHost (olvasás)
-/// - event pipe:   ServiceHost → CLI (írás, az IServiceEventPublisher kezeli)
+/// Two unidirectional pipes:
+/// - command pipe: CLI → ServiceHost (read)
+/// - event pipe:   ServiceHost → CLI (write, handled by IServiceEventPublisher)
 ///
-/// Multi-session: minden CLI hívás egy session. A ServiceHost
-/// a session lezárása után új CLI kapcsolatot vár, amíg
-/// ShutdownToken nem triggerelődik.
+/// Multi-session: every CLI invocation is one session. The ServiceHost
+/// waits for the next CLI connection after a session ends, until
+/// ShutdownToken triggers.
 ///
-/// Session indulási sorrend:
-/// 1. Event pipe nyitása – CLI csatlakozás megvárása (IPipeConnectionLifecycle)
-/// 2. ServiceReadyEvent küldése (IServiceEventPublisher)
-/// 3. Command pipe nyitása – CLI csatlakozás megvárása
-/// 4. Command loop – CLI kilép → pipe lezárul → session vége
+/// Session startup order:
+/// 1. Open the event pipe – wait for CLI connection (IPipeConnectionLifecycle)
+/// 2. Send ServiceReadyEvent (IServiceEventPublisher)
+/// 3. Open the command pipe – wait for CLI connection
+/// 4. Command loop – CLI exits → pipe closes → session ends
 ///
-/// Leállítás:
-/// - ShutdownRequest → CommandDispatcher canceli ShutdownToken-t → loop kilép
-/// - Ctrl+C / SIGTERM → service CancellationToken cancellódik → loop kilép
+/// Shutdown:
+/// - ShutdownRequest → CommandDispatcher cancels ShutdownToken → loop exits
+/// - Ctrl+C / SIGTERM → the service CancellationToken is cancelled → loop exits
 /// </summary>
 public class PipeServer : IAsyncDisposable
 {
     private readonly string _pipeName;
-    private readonly CommandDispatcher _dispatcher;  // TODO: ICommandDispatcher interfész (következő refaktor)
+    private readonly CommandDispatcher _dispatcher;  // TODO: ICommandDispatcher interface (next refactor)
     private readonly IServiceEventPublisher _eventPublisher;
     private readonly IPipeConnectionLifecycle _pipeLifecycle;
     private readonly string _version;
@@ -70,8 +70,8 @@ public class PipeServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// Elindítja a PipeServer-t. Minden CLI session után
-    /// várakozik a következőre, amíg ShutdownToken nem triggerelődik.
+    /// Starts the PipeServer. After every CLI session it waits
+    /// for the next one, until ShutdownToken triggers.
     /// </summary>
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
@@ -94,9 +94,9 @@ public class PipeServer : IAsyncDisposable
 
             if (token.IsCancellationRequested) break;
 
-            // CLI kilépett, ServiceHost fut tovább – következő session előkészítése
+            // CLI exited, ServiceHost keeps running – preparing for the next session
             Console.WriteLine(
-                "[ServiceHost] Session lezárva. Következő CLI kapcsolat előkészítése...");
+                "[ServiceHost] Session closed. Preparing for the next CLI connection...");
 
             try
             {
@@ -110,22 +110,22 @@ public class PipeServer : IAsyncDisposable
     }
 
     /// <summary>
-    /// Egyetlen CLI session teljes életciklusa:
+    /// The full lifecycle of a single CLI session:
     /// event pipe → ready event → command pipe → command loop.
     /// </summary>
     private async Task RunSingleSessionAsync(CancellationToken token)
     {
-        // 1. Event pipe – CLI csatlakozás megvárása
-        Console.WriteLine("[ServiceHost] Event pipe megnyitása...");
+        // 1. Event pipe – wait for CLI connection
+        Console.WriteLine("[ServiceHost] Opening event pipe...");
         await _pipeLifecycle.WaitForConnectionAsync(token);
-        Console.WriteLine("[ServiceHost] Event pipe: CLI csatlakozott.");
+        Console.WriteLine("[ServiceHost] Event pipe: CLI connected.");
 
-        // 2. ServiceReadyEvent – ez a CLI ready jele
+        // 2. ServiceReadyEvent – this is the CLI's ready signal
         await _eventPublisher.PublishServiceReadyAsync(_version, token);
-        Console.WriteLine($"[ServiceHost] Ready. Verzió: {_version}");
+        Console.WriteLine($"[ServiceHost] Ready. Version: {_version}");
 
-        // 3. Command pipe megnyitása
-        Console.WriteLine("[ServiceHost] Command pipe megnyitása...");
+        // 3. Opening the command pipe
+        Console.WriteLine("[ServiceHost] Opening command pipe...");
         _commandPipe = new NamedPipeServerStream(
             pipeName: $"{_pipeName}-commands",
             direction: PipeDirection.In,
@@ -134,23 +134,23 @@ public class PipeServer : IAsyncDisposable
             options: PipeOptions.Asynchronous);
 
         await _commandPipe.WaitForConnectionAsync(token);
-        Console.WriteLine("[ServiceHost] Command pipe: CLI csatlakozott.");
+        Console.WriteLine("[ServiceHost] Command pipe: CLI connected.");
 
         // 4. Command loop
         await RunCommandLoopAsync(token);
 
-        // Cleanup – következő sessionhöz új command pipe kell
+        // Cleanup – the next session needs a new command pipe
         await _commandPipe.DisposeAsync();
         _commandPipe = null;
     }
 
     /// <summary>
-    /// Folyamatosan olvassa a command pipe-ot és dispatch-eli a parancsokat.
-    /// Akkor áll le ha a ShutdownToken triggerelődik vagy a pipe lezárul.
+    /// Continuously reads the command pipe and dispatches the commands.
+    /// Stops when ShutdownToken triggers or the pipe closes.
     /// </summary>
     private async Task RunCommandLoopAsync(CancellationToken cancellationToken)
     {
-        Console.WriteLine("[ServiceHost] Command loop indítva. Várakozás parancsokra...");
+        Console.WriteLine("[ServiceHost] Command loop started. Waiting for commands...");
 
         try
         {
@@ -166,15 +166,15 @@ public class PipeServer : IAsyncDisposable
                 {
                     await _eventPublisher.PublishServiceErrorAsync(
                         errorCode: "PARSE_ERROR",
-                        errorMessage: $"Protobuf parse hiba: {ex.Message}",
+                        errorMessage: $"Protobuf parse error: {ex.Message}",
                         ct: cancellationToken);
                     continue;
                 }
                 catch (IOException ioe)
                 {
                     Console.WriteLine(ioe is EndOfStreamException
-                        ? "[ServiceHost] Command pipe: stream vége."
-                        : "[ServiceHost] Command pipe lezárult. CLI kilépett.");
+                        ? "[ServiceHost] Command pipe: end of stream."
+                        : "[ServiceHost] Command pipe closed. CLI exited.");
                     break;
                 }
 
@@ -186,14 +186,14 @@ public class PipeServer : IAsyncDisposable
                 {
                     await _eventPublisher.PublishServiceErrorAsync(
                         errorCode: "DISPATCH_ERROR",
-                        errorMessage: $"Parancs feldolgozási hiba: {ex.Message}",
+                        errorMessage: $"Command processing error: {ex.Message}",
                         ct: cancellationToken);
                 }
             }
         }
         catch (OperationCanceledException) { }
 
-        Console.WriteLine("[ServiceHost] Command loop leállt.");
+        Console.WriteLine("[ServiceHost] Command loop stopped.");
     }
 
     public async ValueTask DisposeAsync()

@@ -22,25 +22,25 @@ using Scaffold.ServiceHost.Abstractions;
 namespace Scaffold.ServiceHost;
 
 /// <summary>
-/// Inference futtatásáért felelős komponens.
+/// Component responsible for running inference.
 ///
-/// Backend-agnosztikus: nem tudja hogy LLamaSharp vagy API futtatja
-/// az inference-t – ezt az IInferenceBackend elrejti.
+/// Backend-agnostic: does not know whether LLamaSharp or an API runs
+/// the inference – IInferenceBackend hides that.
 ///
-/// Egyszerre csak egy inference futhat – a SemaphoreSlim
-/// biztosítja ezt, és a WaitForCompletionAsync is ezt használja
-/// a graceful shutdown implementálásához.
+/// Only one inference can run at a time – a SemaphoreSlim enforces this,
+/// and WaitForCompletionAsync uses the same lock to implement graceful
+/// shutdown.
 ///
-/// Output path meghatározás:
-/// - Ha az InferRequest.OutputFolder meg van adva, azt használja (CLI határozza meg)
-/// - Ha üres, fallback: _outputBasePath / stepId / (ServiceHost saját logikája)
+/// Output path resolution:
+/// - If InferRequest.OutputFolder is set, uses it (determined by the CLI)
+/// - If empty, falls back to: _outputBasePath / stepId / (ServiceHost's own logic)
 ///
-/// Felelősségei:
-/// - Backend lekérése a ModelCache-ből (lazy betöltéssel)
-/// - Inference futtatása a backenden keresztül
-/// - Kimenet fájlba írása
-/// - Periodikus InferenceProgressEvent küldése
-/// - InferenceCompletedEvent / InferenceFailedEvent / InferenceCancelledEvent küldése
+/// Responsibilities:
+/// - Fetching the backend from ModelCache (with lazy loading)
+/// - Running the inference through the backend
+/// - Writing the output to a file
+/// - Sending periodic InferenceProgressEvents
+/// - Sending InferenceCompletedEvent / InferenceFailedEvent / InferenceCancelledEvent
 /// </summary>
 public class InferenceWorker : IInferenceWorker
 {
@@ -48,7 +48,7 @@ public class InferenceWorker : IInferenceWorker
     private readonly IInferenceEventPublisher _eventPublisher;
     private readonly string _outputBasePath;
 
-    // Az aktív inference CancellationTokenSource-a
+    // CancellationTokenSource of the active inference
     private CancellationTokenSource? _activeInferenceCts;
     private readonly SemaphoreSlim _inferenceLock = new(1, 1);
 
@@ -65,8 +65,8 @@ public class InferenceWorker : IInferenceWorker
     }
 
     /// <summary>
-    /// Elindítja az inference futást.
-    /// Ha már fut egy inference, InvalidOperationException-t dob.
+    /// Starts the inference run.
+    /// Throws InvalidOperationException if an inference is already running.
     /// </summary>
     public async Task RunAsync(
         InferRequest request,
@@ -74,7 +74,7 @@ public class InferenceWorker : IInferenceWorker
     {
         if (!await _inferenceLock.WaitAsync(0))
             throw new InvalidOperationException(
-                $"Már fut egy inference. Kérés: {request.RequestId}");
+                $"An inference is already running. Request: {request.RequestId}");
 
         _activeInferenceCts = CancellationTokenSource.CreateLinkedTokenSource(
             serviceCancellationToken);
@@ -92,8 +92,8 @@ public class InferenceWorker : IInferenceWorker
     }
 
     /// <summary>
-    /// Megszakítja az aktív inference-t.
-    /// Ha nincs aktív inference, no-op.
+    /// Cancels the active inference.
+    /// No-op if there is no active inference.
     /// </summary>
     public void Cancel()
     {
@@ -101,19 +101,19 @@ public class InferenceWorker : IInferenceWorker
     }
 
     /// <summary>
-    /// Megvárja hogy az aktív inference befejezzen.
-    /// A graceful shutdown (force = false) esetén hívja a CommandDispatcher.
-    /// Ha nincs aktív inference, azonnal visszatér.
+    /// Waits for the active inference to complete.
+    /// Called by CommandDispatcher on graceful shutdown (force = false).
+    /// Returns immediately if there is no active inference.
     /// </summary>
     public async Task WaitForCompletionAsync(CancellationToken cancellationToken = default)
     {
-        // A lock megszerzése jelenti hogy nincs aktív inference
+        // Acquiring the lock means there is no active inference
         await _inferenceLock.WaitAsync(cancellationToken);
         _inferenceLock.Release();
     }
 
     // ─────────────────────────────────────────────
-    // Privát implementáció
+    // Private implementation
     // ─────────────────────────────────────────────
 
     private async Task ExecuteInferenceAsync(
@@ -123,14 +123,14 @@ public class InferenceWorker : IInferenceWorker
         var startTime = DateTime.UtcNow;
         var outputFilePath = BuildOutputPath(request);
 
-        await _eventPublisher.PublishInferenceStartedAsync(
-            request.RequestId,
-            request.StepId,
-            request.ModelAlias,
-            cancellationToken);
-
         try
         {
+            await _eventPublisher.PublishInferenceStartedAsync(
+                request.RequestId,
+                request.StepId,
+                request.ModelAlias,
+                cancellationToken);
+
             var backend = await _modelCache.GetOrLoadAsync(
                 request.RequestId,
                 request.ModelAlias,
@@ -138,9 +138,9 @@ public class InferenceWorker : IInferenceWorker
 
             Directory.CreateDirectory(Path.GetDirectoryName(outputFilePath)!);
 
-            // CountingTextWriter interceptálja a token írásokat –
-            // a progress timer olvassa a számlálót anélkül hogy a backend
-            // implementációt módosítani kellene.
+            // CountingTextWriter intercepts the token writes –
+            // the progress timer reads the counter without the backend
+            // implementation needing to change.
             using var progressTimer = new PeriodicTimer(ProgressInterval);
 
             uint tokensGenerated;
@@ -209,11 +209,11 @@ public class InferenceWorker : IInferenceWorker
 
                 string statusMessage = "";
                 if (tokens > 0)
-                    statusMessage = $"Generálás folyamatban... {(uint)elapsed}mp | {tokens:N0} token | {tokensPerSec:F1} tok/s";
+                    statusMessage = $"Generation in progress... {(uint)elapsed}s | {tokens:N0} tokens | {tokensPerSec:F1} tok/s";
                 else if (!startGenMessageSent)
                 {
                     startGenMessageSent = true;
-                    statusMessage = $"Generálás folyamatban... {(uint)elapsed}mp | modell betöltve, generálás indul";
+                    statusMessage = $"Generation in progress... {(uint)elapsed}s | model loaded, generation starting";
                 }
 
                 if (!string.IsNullOrWhiteSpace(statusMessage))
@@ -227,13 +227,13 @@ public class InferenceWorker : IInferenceWorker
     }
 
     /// <summary>
-    /// Meghatározza az output fájl path-ját.
+    /// Determines the output file's path.
     ///
-    /// Ha az InferRequest OutputFolder meg van adva (CLI adja meg, generáció alapján),
-    /// azt használja – ez a normál működési mód.
+    /// If InferRequest.OutputFolder is set (provided by the CLI, based on
+    /// generation), uses it – this is the normal mode of operation.
     ///
-    /// Ha OutputFolder üres (fallback, pl. régi kliensek kompatibilitásához),
-    /// a ServiceHost saját _outputBasePath-ját használja.
+    /// If OutputFolder is empty (fallback, e.g. for compatibility with
+    /// older clients), uses the ServiceHost's own _outputBasePath.
     /// </summary>
     private string BuildOutputPath(InferRequest request)
     {

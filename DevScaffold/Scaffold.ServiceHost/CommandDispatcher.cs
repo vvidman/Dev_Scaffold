@@ -22,20 +22,20 @@ using Scaffold.ServiceHost.Abstractions;
 namespace Scaffold.ServiceHost;
 
 /// <summary>
-/// Beérkező CommandEnvelope üzenetek feldolgozása és routolása.
+/// Processes and routes incoming CommandEnvelope messages.
 ///
-/// A command pipe-ról érkező minden parancsot fogad,
-/// és a megfelelő komponenshez irányítja:
+/// Accepts every command arriving on the command pipe,
+/// and directs it to the appropriate component:
 /// - InferRequest        → IInferenceWorker
 /// - CancelInferRequest  → IInferenceWorker.Cancel()
-/// - ShutdownRequest     → leállítási folyamat
+/// - ShutdownRequest     → shutdown process
 /// - LoadModelRequest    → IModelCacheManager
 /// - UnloadModelRequest  → IModelCacheManager
 /// - ListModelsRequest   → IModelCacheManager + IEventPublisher
 ///
-/// Shutdown szemantika (ADR Protocol #6):
-/// - force = false: megvárja az aktív inference befejezését, majd leáll
-/// - force = true:  azonnal megszakítja az inference-t és leáll
+/// Shutdown semantics (ADR Protocol #6):
+/// - force = false: waits for the active inference to complete, then shuts down
+/// - force = true:  cancels the active inference immediately and shuts down
 /// </summary>
 public class CommandDispatcher
 {
@@ -43,9 +43,9 @@ public class CommandDispatcher
     private readonly IModelCacheManager _modelCache;
     private readonly IEventPublisher _eventPublisher;
 
-    // Shutdown jelzése a PipeServer felé –
-    // a CommandDispatcher nem állítja le a processt,
-    // csak jelzi hogy shutdown parancs érkezett
+    // Signals shutdown to PipeServer –
+    // CommandDispatcher does not stop the process itself,
+    // it only signals that a shutdown command arrived
     private readonly CancellationTokenSource _shutdownCts = new();
 
     public CancellationToken ShutdownToken => _shutdownCts.Token;
@@ -61,7 +61,7 @@ public class CommandDispatcher
     }
 
     /// <summary>
-    /// Feldolgoz egy beérkező CommandEnvelope-ot.
+    /// Processes an incoming CommandEnvelope.
     /// </summary>
     public async Task DispatchAsync(
         CommandEnvelope envelope,
@@ -97,41 +97,65 @@ public class CommandDispatcher
             default:
                 await _eventPublisher.PublishServiceErrorAsync(
                     errorCode: "UNKNOWN_COMMAND",
-                    errorMessage: $"Ismeretlen parancs típus: {envelope.CommandCase}",
+                    errorMessage: $"Unknown command type: {envelope.CommandCase}",
                     ct: cancellationToken);
                 break;
         }
     }
 
     // ─────────────────────────────────────────────
-    // Handler implementációk
+    // Handler implementations
     // ─────────────────────────────────────────────
 
-    private async Task HandleInferAsync(
+    private Task HandleInferAsync(
+        InferRequest request,
+        CancellationToken cancellationToken)
+    {
+        // Fire-and-forget by design (ADR-ServiceHost #9): the command loop must stay
+        // responsive so CancelInferRequest can arrive. The background task is still
+        // *observed*: every failure is converted into an InferenceFailedEvent.
+        _ = RunInferenceObservedAsync(request, cancellationToken);
+        return Task.CompletedTask;
+    }
+
+    private async Task RunInferenceObservedAsync(
         InferRequest request,
         CancellationToken cancellationToken)
     {
         try
         {
-            // Fire and forget – nem blokkoljuk a command pipe olvasását
-            // Az InferenceWorker saját maga küldi az eseményeket
-            _ = Task.Run(
-                async () => await _inferenceWorker.RunAsync(request, cancellationToken),
-                cancellationToken);
+            await Task.Run(() => _inferenceWorker.RunAsync(request, cancellationToken), cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Service shutdown – InferenceWorker publishes the cancellation itself.
         }
         catch (Exception ex)
         {
+            await TryPublishFailureAsync(request, ex);
+        }
+    }
+
+    private async Task TryPublishFailureAsync(InferRequest request, Exception ex)
+    {
+        try
+        {
+            // CancellationToken.None: the failure must be reported even if the
+            // request token is already cancelled.
             await _eventPublisher.PublishInferenceFailedAsync(
-                request.RequestId,
-                request.StepId,
-                ex.Message,
-                cancellationToken);
+                request.RequestId, request.StepId, ex.Message, CancellationToken.None);
+        }
+        catch (Exception publishEx)
+        {
+            // Event pipe is gone (CLI disconnected). Nothing else can be done here.
+            Console.Error.WriteLine(
+                $"[ServiceHost ERROR] Could not publish InferenceFailed for {request.RequestId}: {publishEx.Message}");
         }
     }
 
     private void HandleCancel(CancelInferRequest request)
     {
-        // TODO [SCAFFOLD]: per-request cancel ha több párhuzamos inference lesz
+        // TODO [SCAFFOLD]: per-request cancel once multiple concurrent inferences are supported
         _inferenceWorker.Cancel();
     }
 
@@ -145,12 +169,12 @@ public class CommandDispatcher
 
         if (request.Force)
         {
-            // Azonnali leállás – aktív inference megszakítása
+            // Immediate shutdown – cancel the active inference
             _inferenceWorker.Cancel();
         }
         else
         {
-            // Graceful leállás – megvárjuk az aktív inference befejezését
+            // Graceful shutdown – wait for the active inference to complete
             await _inferenceWorker.WaitForCompletionAsync(cancellationToken);
         }
 
@@ -172,7 +196,7 @@ public class CommandDispatcher
         {
             await _eventPublisher.PublishServiceErrorAsync(
                 errorCode: "MODEL_LOAD_FAILED",
-                errorMessage: $"Backend inicializálási hiba ({request.ModelAlias}): {ex.Message}",
+                errorMessage: $"Backend initialization error ({request.ModelAlias}): {ex.Message}",
                 ct: cancellationToken);
         }
     }
@@ -192,7 +216,7 @@ public class CommandDispatcher
         {
             await _eventPublisher.PublishServiceErrorAsync(
                 errorCode: "MODEL_UNLOAD_FAILED",
-                errorMessage: $"Backend kiürítési hiba ({request.ModelAlias}): {ex.Message}",
+                errorMessage: $"Backend unload error ({request.ModelAlias}): {ex.Message}",
                 ct: cancellationToken);
         }
     }

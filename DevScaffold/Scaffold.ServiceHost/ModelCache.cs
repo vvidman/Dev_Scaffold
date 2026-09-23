@@ -23,38 +23,38 @@ using Scaffold.ServiceHost.Abstractions;
 namespace Scaffold.ServiceHost;
 
 /// <summary>
-/// Lazy backend betöltés és cache kezelés.
+/// Lazy backend loading and cache management.
 ///
-/// Az első inference kéréskor tölti be / inicializálja a backendet,
-/// majd a memóriában tartja a ServiceHost élettartama alatt.
-/// Shutdown-kor felszabadítja az összes betöltött backendet.
+/// Loads / initializes the backend on the first inference request,
+/// then keeps it in memory for the lifetime of the ServiceHost.
+/// Releases every loaded backend on shutdown.
 ///
-/// Két backend típust kezel:
-/// - LlamaInferenceBackend: .gguf path esetén, betöltési idő van
-/// - ApiInferenceBackend:   https:// URL esetén, azonnali init
+/// Handles two backend types:
+/// - LlamaInferenceBackend: for a .gguf path, takes time to load
+/// - ApiInferenceBackend:   for an https:// URL, instant init
 ///
-/// Thread-safe: SemaphoreSlim per-alias lockkal biztosítja hogy
-/// ugyanazt a backendet egyszerre csak egyszer inicializálja,
-/// még párhuzamos kérések esetén sem.
+/// Thread-safe: a per-alias SemaphoreSlim lock ensures the same
+/// backend is only ever initialized once, even under concurrent
+/// requests.
 /// </summary>
 public class ModelCache : IModelCache, IAsyncDisposable
 {
     private readonly ModelRegistryConfig _registry;
     private readonly IInferenceBackendFactory _backendFactory;
 
-    // Betöltött backendek cache-e – alias → IInferenceBackend
+    // Cache of loaded backends – alias → IInferenceBackend
     private readonly Dictionary<string, IInferenceBackend> _loadedBackends = new();
 
-    // Per-alias lock – csak az érintett alias töltése blokkolódik
+    // Per-alias lock – only the affected alias's load is blocked
     private readonly Dictionary<string, SemaphoreSlim> _loadLocks = new();
 
-    // Globális lock a dictionary-k védelméhez
+    // Global lock protecting the dictionaries
     private readonly SemaphoreSlim _dictionaryLock = new(1, 1);
 
     private bool _disposed;
 
-    // Esemény – az EventPublisher feliratkozik erre
-    // így a ModelCache nem függ közvetlenül az EventPublisher-től
+    // Event – EventPublisher subscribes to this
+    // so ModelCache does not depend directly on EventPublisher
     public event Func<string, ModelStatus, string, Task>? ModelStatusChanged;
 
     public ModelCache(ModelRegistryConfig registry, IInferenceBackendFactory backendFactory)
@@ -64,8 +64,8 @@ public class ModelCache : IModelCache, IAsyncDisposable
     }
 
     /// <summary>
-    /// Visszaadja a betöltött backendet az alias alapján.
-    /// Ha még nincs betöltve/inicializálva, most csinálja (lazy).
+    /// Returns the loaded backend for the alias.
+    /// If not loaded/initialized yet, does it now (lazy).
     /// </summary>
     public async Task<IInferenceBackend> GetOrLoadAsync(
         string requestId,
@@ -74,7 +74,7 @@ public class ModelCache : IModelCache, IAsyncDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        // Gyors ellenőrzés – ha már betöltött, azonnal visszaadjuk
+        // Fast check – if already loaded, return it immediately
         await _dictionaryLock.WaitAsync(cancellationToken);
         try
         {
@@ -89,12 +89,12 @@ public class ModelCache : IModelCache, IAsyncDisposable
             _dictionaryLock.Release();
         }
 
-        // Per-alias lock – csak ez az alias blokkolódik betöltés alatt
+        // Per-alias lock – only this alias is blocked while loading
         var aliasLock = _loadLocks[alias];
         await aliasLock.WaitAsync(cancellationToken);
         try
         {
-            // Double-check: lehet hogy amíg vártunk, már betöltötte valaki
+            // Double-check: someone else may have loaded it while we waited
             await _dictionaryLock.WaitAsync(cancellationToken);
             try
             {
@@ -115,8 +115,8 @@ public class ModelCache : IModelCache, IAsyncDisposable
     }
 
     /// <summary>
-    /// Explicit backend betöltés – LoadModelRequest hatására.
-    /// Ha már betöltött, no-op.
+    /// Explicit backend load – triggered by LoadModelRequest.
+    /// If already loaded, no-op.
     /// </summary>
     public async Task LoadAsync(
         string requestId,
@@ -127,7 +127,7 @@ public class ModelCache : IModelCache, IAsyncDisposable
     }
 
     /// <summary>
-    /// Backend kiürítése a memóriából.
+    /// Unloads a backend from memory.
     /// </summary>
     public async Task UnloadAsync(
         string requestId,
@@ -155,7 +155,7 @@ public class ModelCache : IModelCache, IAsyncDisposable
     }
 
     /// <summary>
-    /// Visszaadja a betöltött backendek alias listáját.
+    /// Returns the list of aliases for currently loaded backends.
     /// </summary>
     public async Task<IReadOnlyList<string>> GetLoadedAliasesAsync(
         CancellationToken cancellationToken = default)
@@ -172,7 +172,7 @@ public class ModelCache : IModelCache, IAsyncDisposable
     }
 
     // ─────────────────────────────────────────────
-    // Privát implementáció
+    // Private implementation
     // ─────────────────────────────────────────────
 
     private async Task<IInferenceBackend> LoadBackendAsync(
@@ -184,7 +184,7 @@ public class ModelCache : IModelCache, IAsyncDisposable
 
         if (ModelStatusChanged is not null)
             await ModelStatusChanged(alias, ModelStatus.Loading,
-                "Backend inicializálása...");
+                "Initializing backend...");
 
         try
         {
@@ -202,7 +202,7 @@ public class ModelCache : IModelCache, IAsyncDisposable
 
             if (ModelStatusChanged is not null)
                 await ModelStatusChanged(alias, ModelStatus.Loaded,
-                    $"Backend kész: {alias}");
+                    $"Backend ready: {alias}");
 
             return backend;
         }
@@ -210,7 +210,7 @@ public class ModelCache : IModelCache, IAsyncDisposable
         {
             if (ModelStatusChanged is not null)
                 await ModelStatusChanged(alias, ModelStatus.Failed,
-                    $"Backend inicializálási hiba: {ex.Message}");
+                    $"Backend initialization error: {ex.Message}");
             throw;
         }
     }

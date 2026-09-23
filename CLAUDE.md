@@ -24,7 +24,18 @@ dotnet run --project DevScaffold/Scaffold.CLI -- shutdown
 dotnet run --project DevScaffold/Scaffold.ServiceHost
 ```
 
-There are no automated tests in this repository yet. No lint step is configured.
+## Tests
+
+```bash
+dotnet test DevScaffold/DevScaffold.slnx
+```
+
+- `Scaffold.Tests` – application, validation, input assembly, artifact handling, protocol framing
+- `Scaffold.ServiceHost.Tests` – command dispatch and failure-path behaviour (no model, no pipes)
+
+Tests pin ADR decisions; when a test fails after a change, check the referenced ADR first.
+
+No lint step is configured.
 
 ## Architecture
 
@@ -66,7 +77,7 @@ Two layers run automatically before human review is triggered:
 1. **Universal validator** — detects stop tokens, truncation, token-limit proximity
 2. **Per-step validators** — structural and constraint checks (e.g., `TaskBreakdownValidator`)
 
-When validation fails, a targeted refinement prompt is retried automatically (up to the configured attempt limit) — the human is only involved after automatic validation passes. See `scaffold_validation_principles.md` for the philosophy on validator scope.
+When validation fails, a targeted refinement prompt is retried automatically (up to the configured attempt limit) — the human is only involved after automatic validation passes. See `Scaffold.Validation/ADR-Validation.md` for the philosophy on validator scope.
 
 ### Configuration (YAML)
 
@@ -100,3 +111,6 @@ Architecture Decision Records document all major design choices and should be co
 - `Scaffold.Agent.Protocol/ADR-Protocol.md` — protobuf message design, framing, correlation
 - `Scaffold.CLI/ADR-CLI.md` — CLI lifecycle, pipe client, generation numbering, audit log, console colors
 - `Scaffold.ServiceHost/ADR-ServiceHost.md` — startup, model cache, fire-and-forget inference, graceful shutdown
+- `Scaffold.Validation/ADR-Validation.md` — validator scope, error-driven refinement, what is and isn't automated
+
+The README "Trade-offs and Known Limitations" section must be updated whenever a change removes or introduces a limitation.

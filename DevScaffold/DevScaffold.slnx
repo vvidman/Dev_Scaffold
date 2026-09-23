@@ -2,7 +2,11 @@
   <Folder Name="/Solution Items/">
     <File Path="../LICENSE" />
     <File Path="../README.md" />
-    <File Path="scaffold_validation_principles.md" />
+    <File Path="../.github/workflows/ci.yml" />
+    <File Path="Scaffold.Agent.Protocol/ADR-Protocol.md" />
+    <File Path="Scaffold.CLI/ADR-CLI.md" />
+    <File Path="Scaffold.ServiceHost/ADR-ServiceHost.md" />
+    <File Path="Scaffold.Validation/ADR-Validation.md" />
   </Folder>
   <Project Path="Scaffold.Agent.Protocol/Scaffold.Agent.Protocol.csproj" Id="6fc0f1fa-7b9f-4e08-8263-cf27b83255e8" />
   <Project Path="Scaffold.Application/Scaffold.Application.csproj" />
@@ -14,4 +18,8 @@
   <Project Path="Scaffold.Validation.Abstractions/Scaffold.Validation.Abstractions.csproj" Id="d98a2c35-81ec-4d5a-b986-6c73250c616f" />
   <Project Path="Scaffold.Validation.Steps/Scaffold.Validation.Steps.csproj" Id="2eb120cc-942d-45df-808c-28b423002b42" />
   <Project Path="Scaffold.Validation/Scaffold.Validation.csproj" Id="8d92ba7c-91b9-4b35-9be0-4f9a18910233" />
+  <Folder Name="/tests/">
+    <Project Path="Scaffold.Tests/Scaffold.Tests.csproj" />
+    <Project Path="Scaffold.ServiceHost.Tests/Scaffold.ServiceHost.Tests.csproj" />
+  </Folder>
 </Solution>

@@ -1,11 +1,11 @@
-## Visual Studio mappák
+## Visual Studio folders
 .vs/
 
 ## Build output
 bin/
 obj/
 
-## User-specifikus fájlok
+## User-specific files
 *.user
 *.rsuser
 *.suo
@@ -25,15 +25,18 @@ packages/
 *.nupkg
 *.snupkg
 
-## Teszteredmények
+## Test results
 TestResults/
 *.coverage
 *.coveragexml
 
-## Logok
+## Logs
 *.log
 
-## OS fájlok
+## OS files
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+## Machine-specific CLI configuration – see Scaffold.CLI.example.yaml
+DevScaffold/Scaffold.CLI/Scaffold.CLI.yaml

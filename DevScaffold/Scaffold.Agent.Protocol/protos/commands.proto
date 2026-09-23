@@ -9,16 +9,15 @@ import "models.proto";
 
 // ─────────────────────────────────────────────
 // COMMAND ENVELOPE
-// A command pipe-on mindig ezt az üzenetet küldjük.
+// This is always the message sent on the command pipe.
 //
-// Importálja az inference.proto és models.proto
-// üzenettípusait – ez az egyetlen fájl ami mindkettőt látja.
+// Imports the message types from inference.proto and models.proto –
+// this is the only file that sees both.
 //
-// A oneof garantálja hogy egyszerre csak egy parancs
-// lehet beállítva – bináris szinten csak az aktív mező
-// kerül szerializálásra.
+// The oneof guarantees that only one command can be set at a time –
+// at the binary level, only the active field gets serialized.
 //
-// C#-ban: CommandEnvelope.CommandCase enum + a megfelelő property.
+// In C#: CommandEnvelope.CommandCase enum + the corresponding property.
 // ─────────────────────────────────────────────
 
 message CommandEnvelope {

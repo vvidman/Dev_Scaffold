@@ -5,26 +5,26 @@ package scaffold.agent;
 option csharp_namespace = "Scaffold.Agent.Protocol";
 
 // ─────────────────────────────────────────────
-// MODELL ELŐZETES BETÖLTÉS
-// Opcionális – lazy betöltés esetén nem kötelező hívni.
-// Hasznos ha előre tudod hogy szükséged lesz a modellre
-// és nem akarod hogy az első inference kérés várjon.
+// MODEL PRELOAD
+// Optional – not required to call with lazy loading.
+// Useful if you know in advance that you'll need the model
+// and don't want the first inference request to wait.
 // ─────────────────────────────────────────────
 
 message LoadModelRequest {
-    // Korrelációs azonosító – az event pipe-on
-    // ugyanezzel az id-val érkeznek a betöltési események.
+    // Correlation identifier – the loading events on the event pipe
+    // arrive with this same id.
     string request_id = 1;
 
-    // A betöltendő modell aliasa – models.yaml-ban definiált.
+    // The alias of the model to load – as defined in models.yaml.
     string model_alias = 2;
 }
 
 // ─────────────────────────────────────────────
-// MODELL KIÜRÍTÉS
-// Felszabadítja a modellt a memóriából.
-// Aktív inference alatt nem hajtható végre –
-// a ServiceHost megvárja a befejezést.
+// MODEL UNLOAD
+// Frees the model from memory.
+// Cannot be executed during an active inference –
+// the ServiceHost waits for it to finish.
 // ─────────────────────────────────────────────
 
 message UnloadModelRequest {
@@ -33,10 +33,10 @@ message UnloadModelRequest {
 }
 
 // ─────────────────────────────────────────────
-// BETÖLTÖTT MODELLEK LEKÉRDEZÉSE
-// Csak a memóriában lévő modelleket adja vissza.
-// A human pontosan tudja milyen modellek érhetők el –
-// csak a betöltött állapot az érdekes.
+// QUERY LOADED MODELS
+// Only returns the models currently in memory.
+// Lets the human know exactly which models are available –
+// only the loaded state matters here.
 // ─────────────────────────────────────────────
 
 message ListModelsRequest {

@@ -148,7 +148,7 @@ The `Scaffold.Agent.Protocol` project contains the complete protocol definition 
 
 **Rationale:**
 - The CLI waits for this event during auto-start — it is the basis for the pipe-ready timeout
-- The `version` field is useful for future compatibility checks — CLI and ServiceHost versions can be compared
+- The `version` field is useful for future compatibility checks — CLI and ServiceHost versions can be compared. Not implemented yet: the CLI only checks that `ServiceReadyEvent` arrived, it never inspects `version`. This gap is listed in the README "Trade-offs and Known Limitations" section.
 - `started_at` is diagnostically valuable — shows how long startup took
 
 ---

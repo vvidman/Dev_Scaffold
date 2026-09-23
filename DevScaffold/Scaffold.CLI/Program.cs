@@ -336,6 +336,13 @@ async Task<int> RunAsync(
             scaffoldConsole.WriteCli("[SCAFFOLD] Run cancelled.");
             return 1;
         }
+        catch (TimeoutException ex)
+        {
+            // Expected, handled state (liveness timeout) – the handler already wrote the audit log.
+            scaffoldConsole.WriteError($"[SCAFFOLD ERROR] {ex.Message}");
+            scaffoldConsole.WriteError("[SCAFFOLD] The ServiceHost may be stuck. Try 'DevScaffold shutdown' and run the step again.");
+            return 1;
+        }
         catch (Exception ex)
         {
             scaffoldConsole.WriteError($"[SCAFFOLD ERROR] Unexpected error: {ex.Message}");

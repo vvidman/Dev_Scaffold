@@ -40,3 +40,6 @@ Desktop.ini
 
 ## Machine-specific CLI configuration – see Scaffold.CLI.example.yaml
 DevScaffold/Scaffold.CLI/Scaffold.CLI.yaml
+
+## Local Claude Code settings
+.claude/settings.local.json

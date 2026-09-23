@@ -148,6 +148,14 @@ CLI always receives a terminal event for its `request_id`. As a second line of
 defense, the CLI applies a liveness timeout (3 × progress interval) and fails
 the step instead of waiting forever if the ServiceHost goes silent.
 
+**Heartbeat:** `InferenceProgressEvent` is sent on every progress tick for the whole
+request lifetime – model loading, prompt processing and generation – so the CLI's
+liveness timeout (3 × interval) measures ServiceHost silence, not model speed.
+The status message names the phase: `Loading model '<alias>'... Ns`,
+`Processing prompt... Ns`, then `Generation in progress... | tokens | tok/s`.
+The timer starts right after `InferenceStartedEvent` and is stopped before any
+terminal event is published.
+
 ---
 
 ### 10. `InferenceWorker` — `SemaphoreSlim` to limit concurrent inference

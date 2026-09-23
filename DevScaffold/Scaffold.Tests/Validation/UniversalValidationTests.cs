@@ -40,11 +40,11 @@ public sealed class UniversalValidationTests
         var result = validator.Validate("   ", "any_step", null, 0);
 
         Assert.IsFalse(result.Passed);
-        Assert.AreEqual(1, result.Violations.Count);
+        Assert.HasCount(1, result.Violations);
         Assert.AreEqual("EMPTY_OUTPUT", result.Violations[0].RuleId);
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("<|end|>")]
     [DataRow("<|endoftext|>")]
     [DataRow("<|im_end|>")]

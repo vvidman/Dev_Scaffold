@@ -50,7 +50,7 @@ public sealed class ArtifactPathGuardTests
         Assert.IsTrue(fullPath!.StartsWith(Path.GetFullPath(_tempRoot), StringComparison.Ordinal));
     }
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("../x.cs")]
     [DataRow("a/../../x.cs")]
     [DataRow("")]

@@ -138,8 +138,10 @@ internal sealed class InferenceResultHandler : IInferenceResultHandler
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             var timeoutSeconds = (int)livenessTimeout.TotalSeconds;
+            var cancelSent = await TrySendCancelAsync(pipeClient, request.RequestId);
             auditLogger.Log(AuditEvent.Error,
-                $"reason=inference_liveness_timeout timeout={timeoutSeconds}s");
+                $"reason=inference_liveness_timeout timeout={timeoutSeconds}s " +
+                $"cancel_sent={(cancelSent ? "true" : "false")}");
             throw new TimeoutException(
                 $"No event received from ServiceHost for request {request.RequestId} within {timeoutSeconds}s.");
         }
@@ -152,6 +154,30 @@ internal sealed class InferenceResultHandler : IInferenceResultHandler
     // ─────────────────────────────────────────────
     // Private implementation
     // ─────────────────────────────────────────────
+
+    private static readonly TimeSpan CancelSendTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Best effort: asks the ServiceHost to stop working on an abandoned request,
+    /// so the next --step does not fail with "already running". Never throws.
+    /// </summary>
+    private static async Task<bool> TrySendCancelAsync(IPipeClient pipeClient, string requestId)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(CancelSendTimeout);
+            var envelope = new CommandEnvelope
+            {
+                Cancel = new CancelInferRequest { RequestId = requestId }
+            };
+            await pipeClient.SendAsync(envelope, cts.Token).WaitAsync(cts.Token);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
 
     private async Task HandleCompletedAsync(
         InferenceCompletedEvent completed,

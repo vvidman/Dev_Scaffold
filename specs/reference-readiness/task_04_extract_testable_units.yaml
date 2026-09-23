@@ -1,0 +1,120 @@
+task_id: "04"
+title: "Tesztelhető egységek kiemelése a Program.cs-ből — GenerationCalculator, ArtifactApplier"
+depends_on: ["02"]
+
+description: |
+  A generációszám-számítás (ComputeNextGeneration / TryParseGeneration) és az
+  --apply másolási logika (ApplyAsync) jelenleg static lokális függvények a
+  CLI Program.cs-ben. Így nem tesztelhetők, és a composition root felelőssége
+  túlnő a kompozíción.
+
+  Ez a task tiszta refaktor: a viselkedés NEM változik (a task_02 path guardja
+  kivételével, ami már benne van). Cél, hogy a task_05 tesztjei közvetlenül
+  ezeket az osztályokat tesztelhessék.
+
+  Elhelyezés: Scaffold.Application — mindkettő a step output struktúra
+  alkalmazásszintű szabálya, nem CLI-specifikus infrastruktúra.
+  A konzolkiírás a Program.cs-ben marad: az osztályok eredményt adnak vissza,
+  nem írnak konzolra (így a tesztekhez nem kell IScaffoldConsole mock).
+
+files_to_create:
+  - path: DevScaffold/Scaffold.Application/Output/GenerationCalculator.cs
+    content: |
+      (Apache license header.)
+
+      namespace Scaffold.Application.Output;
+
+      /// <summary>
+      /// Computes the next generation number for a step output folder.
+      /// Filesystem-based and therefore correct across CLI process restarts
+      /// (ADR-CLI #16). Takes the maximum existing number + 1, not the count,
+      /// so sparse sequences (a deleted folder) are handled correctly.
+      ///
+      /// Folder naming: {stepId}_{generation}, e.g. task_breakdown_3.
+      /// </summary>
+      public static class GenerationCalculator
+      {
+          public static int ComputeNext(string outputBasePath, string stepId) { ... }
+
+          /// <summary>Returns the generation number, or null if the folder name does not match {stepId}_{int}.</summary>
+          public static int? TryParseGeneration(string folderName, string stepId) { ... }
+      }
+
+      A metódustörzseket a Program.cs-ből emeld át VÁLTOZATLANUL.
+
+  - path: DevScaffold/Scaffold.Application/Artifacts/ArtifactApplier.cs
+    content: |
+      (Apache license header.)
+
+      namespace Scaffold.Application.Artifacts;
+
+      public enum ArtifactApplyStatus { Copied, WouldCopy, SkippedUnsafePath }
+
+      public sealed record ArtifactApplyEntry(
+          string StepFolder,
+          string RelativePath,
+          string? TargetPath,
+          ArtifactApplyStatus Status);
+
+      public sealed record ArtifactApplyResult(
+          IReadOnlyList<ArtifactApplyEntry> Entries,
+          IReadOnlyList<string> SkippedFoldersWithoutArtifacts)
+      {
+          public int CopiedCount => Entries.Count(e => e.Status == ArtifactApplyStatus.Copied);
+      }
+
+      /// <summary>
+      /// Copies files from {stepOutputFolder}/artifacts/ into the target project root.
+      /// Always overwrites (deliberate decision, see README "Applying Generated Artifacts").
+      /// Every target path is validated by ArtifactPathGuard.
+      /// Performs no console output – the caller renders the result.
+      /// </summary>
+      public static class ArtifactApplier
+      {
+          public static ArtifactApplyResult Apply(
+              string outputBasePath,
+              IEnumerable<string> stepFolderNames,
+              string projectRoot,
+              bool dryRun,
+              CancellationToken cancellationToken = default) { ... }
+      }
+
+      A logikát a Program.cs ApplyAsync-ből emeld át. A projectRoot létezésének
+      és konfiguráltságának ellenőrzése a Program.cs-ben marad (az CLI-szintű
+      input validáció, exit code-dal).
+
+files_to_modify:
+  - path: DevScaffold/Scaffold.CLI/Program.cs
+    change: |
+      1. Töröld a ComputeNextGeneration és TryParseGeneration lokális függvényeket;
+         a hívás helyén: GenerationCalculator.ComputeNext(outputBasePath, stepId).
+      2. Az ApplyAsync maradjon a CLI belépési pontja, de:
+         - project_root ellenőrzés (null / nem létező mappa) marad itt, exit 1
+         - a másolást az ArtifactApplier.Apply végzi
+         - a visszakapott ArtifactApplyResult alapján írja ki:
+             Copied            → "[SCAFFOLD APPLY] {rel} → {target}"
+             WouldCopy         → "[DRY-RUN] {rel} → {target}"
+             SkippedUnsafePath → sárga/piros figyelmeztetés
+             SkippedFoldersWithoutArtifacts → "[SCAFFOLD APPLY] Skipped (no artifacts/): {folder}"
+           valamint a záró összesítést.
+         - Ha az ApplyAsync már nem használ await-et, legyen szinkron `static int Apply(...)`,
+           és a mode switch-ben igazítsd a hívást.
+      3. Használd az IScaffoldConsole-t (ConsoleScaffoldConsole) a közvetlen
+         Console.ForegroundColor / Console.Error.WriteLine hívások helyett ebben a
+         kódútban — a projekt ADR-CLI #18 szerint minden kimenet ezen megy át.
+
+  - path: DevScaffold/Scaffold.CLI/ADR-CLI.md
+    change: |
+      A "Component structure" (#6) táblázatba vedd fel:
+        | `GenerationCalculator` | Filesystem-based next-generation computation |
+        | `ArtifactApplier`      | Copies staged artifacts into project_root, returns a result model (no I/O to console) |
+        | `ArtifactPathGuard`    | Keeps untrusted, LLM-derived paths inside a root directory |
+      A "Program.cs" sorból vedd ki a "generation computation"-t.
+
+acceptance_criteria:
+  - "A Program.cs-ben nincs ComputeNextGeneration / TryParseGeneration, és nincs File.Copy"
+  - "GenerationCalculator és ArtifactApplier public, a Scaffold.Application projektben van, konzolfüggőség nélkül"
+  - "A --step és --apply (dry-run is) futás kimenete és exit code-ja funkcionálisan azonos a refaktor előttivel"
+  - "Az --apply kódút az IScaffoldConsole-t használja"
+  - "Az ADR-CLI komponens táblázata frissült"
+  - "A solution lefordul hibák nélkül"

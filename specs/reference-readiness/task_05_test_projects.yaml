@@ -1,0 +1,199 @@
+task_id: "05"
+title: "Tesztprojektek — MSTest + NSubstitute, a tiszta logika és a protokoll-szerződés lefedése"
+depends_on: ["02", "03", "04"]
+
+description: |
+  Jelenleg nincs automatizált teszt (a README és a CLAUDE.md is ezt mondja).
+  Referencia-projektnél ez a legnagyobb hitelességi rés.
+
+  Cél NEM a teljes lefedettség, hanem célzott tesztek ott, ahol a design
+  állításai vannak. Minden tesztosztály egy ADR-döntést vagy egy validációs
+  elvet "pinel". A tesztnevek legyenek beszédesek, mert a bíráló valószínűleg
+  a tesztneveket fogja olvasni, nem a törzseket.
+
+  Két tesztprojekt (a rétegződést a tesztek is tükrözik):
+  - Scaffold.Tests: Application, Validation, Validation.Steps,
+    Infrastructure.ConfigHandler, Agent.Protocol
+  - Scaffold.ServiceHost.Tests: CommandDispatcher (csak interfészeken át, valódi
+    modell/pipe nélkül)
+
+  Framework: MSTest + NSubstitute (a projekt meglévő választása).
+  Csomagverziók: a legfrissebb stabil verziók `dotnet add package`-dzsel —
+  NE hardkódolj régi verziót. Célkeretrendszer: net10.0.
+
+  Általános szabályok:
+  - Fájlrendszert érintő teszteknél minden teszt saját temp mappát kap
+    (Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"))),
+    [TestCleanup]-ban törölve.
+  - Nincs Thread.Sleep. Az aszinkron fire-and-forget viselkedést
+    TaskCompletionSource + WaitAsync(timeout) segítségével várd meg.
+  - Platformfüggetlen útvonalak (Path.Combine, nem hardkódolt "\").
+  - A tesztnév minta: Method_Condition_ExpectedResult.
+  - Ha egy teszt a meglévő kód VÁRATLAN viselkedését mutatja meg, NE javítsd
+    csendben a produkciós kódot: jelöld a tesztet [Ignore("Known issue: ...")]
+    attribútummal, és írd le a task végén az összefoglalóban.
+
+files_to_create:
+  - path: DevScaffold/Scaffold.Tests/Scaffold.Tests.csproj
+    content: |
+      `dotnet new mstest -n Scaffold.Tests -o DevScaffold/Scaffold.Tests`, majd:
+      - NSubstitute (+ NSubstitute.Analyzers.CSharp, PrivateAssets=all)
+      - ProjectReference: Scaffold.Application, Scaffold.Validation,
+        Scaffold.Validation.Steps, Scaffold.Infrastructure.ConfigHandler,
+        Scaffold.Agent.Protocol, Scaffold.Domain, Scaffold.Validation.Abstractions
+      - Nullable enable, ImplicitUsings enable
+      - Add hozzá a DevScaffold.slnx-hez egy /tests/ solution mappába.
+
+  - path: DevScaffold/Scaffold.ServiceHost.Tests/Scaffold.ServiceHost.Tests.csproj
+    content: |
+      Ugyanígy, ProjectReference: Scaffold.ServiceHost, Scaffold.ServiceHost.Abstractions,
+      Scaffold.Agent.Protocol. Szintén a /tests/ solution mappába.
+
+  - path: DevScaffold/Scaffold.Tests/Output/GenerationCalculatorTests.cs
+    content: |
+      ADR-CLI #16. Esetek:
+      - ComputeNext_OutputFolderMissing_ReturnsOne
+      - ComputeNext_NoMatchingFolders_ReturnsOne
+      - ComputeNext_SequentialFolders_ReturnsMaxPlusOne          (1,2 → 3)
+      - ComputeNext_SparseFolders_UsesMaxNotCount                (1,3 → 4)
+      - ComputeNext_OtherStepWithSharedPrefix_IsIgnored          (task_breakdown vs task_breakdown_extra_1)
+      - ComputeNext_NonNumericSuffix_IsIgnored                   (task_breakdown_old)
+      - TryParseGeneration_DifferentCase_IsParsed                (TASK_BREAKDOWN_2 → 2)
+
+  - path: DevScaffold/Scaffold.Tests/Artifacts/ArtifactPathGuardTests.cs
+    content: |
+      Biztonsági szerződés. [DataTestMethod]/[DataRow] használatával:
+      - TryResolveWithin_NestedRelativePath_ReturnsPathInsideRoot
+      - TryResolveWithin_ParentTraversal_ReturnsFalse         ("../x.cs", "a/../../x.cs")
+      - TryResolveWithin_RootedPath_ReturnsFalse              (Path.GetFullPath-tal képzett abszolút út, platformfüggetlenül)
+      - TryResolveWithin_SiblingWithSharedPrefix_ReturnsFalse ("../root-other/x.cs", ahol a root neve "root")
+      - TryResolveWithin_EmptyOrWhitespace_ReturnsFalse
+      - TryResolveWithin_DotSegmentsStayingInside_ReturnsTrue ("a/./b/../c.cs")
+
+  - path: DevScaffold/Scaffold.Tests/Artifacts/DefaultMarkdownArtifactExtractorTests.cs
+    content: |
+      - Extract_EmptyMarkdown_ReturnsEmpty
+      - Extract_SingleBlockWithHint_UsesHintPathAndStripsHintLine
+      - Extract_HintPrefixNull_UsesFallbackName                 ("artifact_01.cs")
+      - Extract_HintMissingInBlock_UsesFallbackName
+      - Extract_UnknownLanguage_FallbackExtensionIsTxt
+      - Extract_MultipleBlocks_FallbackIndexFollowsBlockOrder   (artifact_01, artifact_02)
+      - Extract_WhitespaceOnlyBlock_IsSkipped
+      - Extract_CrLfLineEndings_AreHandled
+
+  - path: DevScaffold/Scaffold.Tests/Artifacts/ArtifactApplierTests.cs
+    content: |
+      - Apply_DryRun_WritesNothingAndReportsWouldCopy
+      - Apply_ExistingTargetFile_IsOverwritten                  (dokumentált döntés)
+      - Apply_FolderWithoutArtifacts_IsReportedAsSkipped
+      - Apply_MultipleFolders_ProcessesAll
+      - Apply_NestedArtifact_PreservesRelativeStructure
+
+  - path: DevScaffold/Scaffold.Tests/Validation/UniversalValidationTests.cs
+    content: |
+      A UniversalOutputValidator internal → a public CompositeOutputValidator-on
+      keresztül teszteld, üres StepValidatorRegistry-vel (nincs InternalsVisibleTo).
+      Olvasd el az OutputValidationResult-ot (Passed / Errors / Warnings), és
+      ahhoz igazítsd az assertokat.
+      - Validate_EmptyOutput_ReturnsOnlyEmptyOutputError
+      - Validate_LeakedStopToken_ReturnsStopTokenLeaked         ([DataRow] minden ismert tokenre)
+      - Validate_LastLineCutMidSentence_ReturnsTruncatedOutput
+      - Validate_LastLineIsHeading_IsNotTruncated
+      - Validate_ShortLastLineWithoutPunctuation_IsNotTruncated (≤ 20 karakter — dokumentált heurisztika)
+      - Validate_TokensAt95PercentOfMax_AddsWarningButPasses
+      - Validate_MaxTokensNotConfigured_NoProximityCheck
+      - Validate_UniversalError_StepValidatorStillRuns          (NSubstitute IStepOutputValidator a registryben;
+                                                                 a Composite doksi szerint minden violation összegyűlik)
+
+  - path: DevScaffold/Scaffold.Tests/Validation/TaskBreakdownValidatorTests.cs
+    content: |
+      Olvasd el a TaskBreakdownValidator-t (task heading regex: ^(\d+)\.\s) és
+      írj egy minimális, érvényes 2 taskos markdown fixture-t.
+      - Validate_ValidOutput_NoViolations
+      - Validate_TaskMissingRequiredField_ReturnsMissingRequiredField (a task sorszámával a Description-ben)
+      - Validate_TaskCountAboveMax_ReturnsTaskCountViolation
+      - Validate_RuleSetOverridesDefaultRequiredFields
+      - Validate_ForbiddenKeyword_ReturnsError
+      - Validate_WarningKeyword_ReturnsWarningNotError
+      - Validate_DuplicateHeadings_ReturnsWarning
+      - Validate_ForbiddenAffectedFile_DoesNotMatchLongerFileName
+          (a regex precíziós elv: pl. tiltott "Repository.cs" NE illeszkedjen
+           "IRepository.cs"-re és "CachingRepository.cs"-re — nézd meg a
+           CheckForbiddenAffectedFiles tényleges viselkedését, és ahhoz írd
+           a tesztet; ha nem így működik, [Ignore("Known issue")]-val jelöld)
+
+  - path: DevScaffold/Scaffold.Tests/Refinement/RefinementStrategyTests.cs
+    content: |
+      ADR-CLI #12 és a validációs elvek "error-driven refinement" része.
+      - BuildAutoRejectionClarification_ErrorsWithFixHints_PrefixedWithAutoAndListsRuleIds
+      - BuildAutoRejectionClarification_NoFixHints_UsesFallbackText
+      - BuildRefinedSystemPrompt_AutoClarification_UsesAutomaticRejectionHeader
+      - BuildRefinedSystemPrompt_HumanClarification_UsesHumanReviewerHeader
+      - BuildRefinedSystemPrompt_KeepsOriginalPromptFirst
+      - BuildRefinedSystemPrompt_LogsRefinementToAudit          (IAuditLogger substitute, Received(1))
+
+  - path: DevScaffold/Scaffold.Tests/Input/InputAssemblerTests.cs
+    content: |
+      Fail-fast szerződés (IInputAssembler doksi).
+      - Assemble_PrimaryInputMissing_ThrowsFileNotFound
+      - Assemble_ReferencedPathMissing_ThrowsScaffoldInputValidationException (a kivétel tartalmazza a mezőutat, pl. "context.spec_path")
+      - Assemble_NestedPathInSequence_IsResolvedAndInlined
+      - Assemble_RelativePathsResolvedAgainstYamlDirectory
+      - Assemble_SecondaryInput_AppendedAfterPrimaryWithSeparator
+      - Assemble_TildeOrEmptyPathValue_IsIgnored
+
+  - path: DevScaffold/Scaffold.Tests/Protocol/EnvelopeFramingTests.cs
+    content: |
+      ADR-ServiceHost #3 és ADR-Protocol #2/#3: a pipe-szerződés.
+      MemoryStream-en, valódi pipe nélkül:
+      - WriteDelimited_MultipleEnvelopes_ParsedBackInOrder      (Infer, Cancel, Shutdown egymás után)
+      - CommandEnvelope_Oneof_ExposesCorrectCommandCase
+      - EventEnvelope_InferenceFailed_RoundTripsRequestIdAndMessage
+      - ParseDelimited_EmptyStream_ReturnsNullOrThrows          (rögzítsd a TÉNYLEGES viselkedést —
+                                                                 a PipeServer olvasási ciklusa erre épít)
+
+  - path: DevScaffold/Scaffold.ServiceHost.Tests/CommandDispatcherTests.cs
+    content: |
+      A task_03 javításának regressziós tesztjei. IInferenceWorker, IModelCacheManager,
+      IEventPublisher → NSubstitute. A belépési pont: DispatchAsync(CommandEnvelope, ct).
+      A publikálást egy TaskCompletionSource-szal kapd el:
+        eventPublisher.PublishInferenceFailedAsync(default!, default!, default!, default)
+            .ReturnsForAnyArgs(ci => { tcs.TrySetResult(ci.ArgAt<string>(0)); return Task.CompletedTask; });
+      - DispatchAsync_InferWhileBusy_PublishesInferenceFailedWithRequestId
+          (worker.RunAsync ThrowsAsync(new InvalidOperationException(...)))
+      - DispatchAsync_Infer_ReturnsBeforeInferenceCompletes
+          (a worker egy soha el nem készülő Task-ot ad vissza; a DispatchAsync mégis rögtön visszatér —
+           ez az ADR #9 lényege)
+      - DispatchAsync_InferFailsAndPublisherThrows_DoesNotCrash
+      - DispatchAsync_ShutdownForce_CancelsWorkerAndSignalsShutdownToken
+      - DispatchAsync_ShutdownGraceful_WaitsForCompletionBeforeSignalling
+      - DispatchAsync_UnknownCommand_PublishesServiceError
+
+files_to_modify:
+  - path: CLAUDE.md
+    change: |
+      "There are no automated tests in this repository yet." helyett:
+
+        ## Tests
+        ```bash
+        dotnet test DevScaffold/DevScaffold.slnx
+        ```
+        - `Scaffold.Tests` – application, validation, input assembly, artifact handling, protocol framing
+        - `Scaffold.ServiceHost.Tests` – command dispatch and failure-path behaviour (no model, no pipes)
+        Tests pin ADR decisions; when a test fails after a change, check the referenced ADR first.
+
+  - path: README.md
+    change: |
+      A "Project Status" → "Not yet implemented" listából vedd ki az
+      "Automated test suite"-ot, a "Working end-to-end" listába vedd fel:
+        - Unit tests for validators, refinement, input assembly, artifact handling,
+          protocol framing and the ServiceHost failure path (`dotnet test DevScaffold/DevScaffold.slnx`)
+      A Build from source mellé add hozzá a `dotnet test` parancsot.
+
+acceptance_criteria:
+  - "`dotnet test DevScaffold/DevScaffold.slnx` zölden fut, Windows-on és Linuxon is (nincs Windows-specifikus útvonal a tesztekben)"
+  - "Minden fent felsorolt teszt létezik; ahol [Ignore] szerepel, annak oka a task összefoglalójában le van írva"
+  - "Egyik teszt sem használ Thread.Sleep-et, valódi LLM modellt, hálózatot vagy Named Pipe-ot"
+  - "A temp mappák minden teszt után törlődnek"
+  - "A CLAUDE.md és a README tükrözi, hogy vannak tesztek"
+  - "A task végén rövid összefoglaló: tesztek száma projektenként, és a talált eltérések listája"

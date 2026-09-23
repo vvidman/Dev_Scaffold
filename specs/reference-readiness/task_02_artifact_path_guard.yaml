@@ -1,0 +1,139 @@
+task_id: "02"
+title: "Artifact útvonal-védelem — path traversal kizárása a kinyerésnél és az --apply-nál"
+depends_on: []
+
+description: |
+  BIZTONSÁGI JAVÍTÁS. Az artifact célútvonala LLM kimenetből származik
+  (a `// filepath:` hint sorból). Jelenleg:
+
+    CodingOutputExtractor:
+      var targetPath = Path.Combine(artifactsRoot, artifact.RelativeFilePath);
+
+  Két konkrét hibaeset:
+  1. "../../../Windows/x.cs" → a "..." szegmensek kivezetnek az artifacts/ mappából.
+  2. "C:\Users\...\x.cs" vagy "/etc/x" → a Path.Combine abszolút második
+     argumentumnál ELDOBJA az első argumentumot, a fájl bárhová íródhat.
+
+  Az --apply ugyanígy Path.Combine(config.ProjectRoot, relativePath)-t használ.
+  Ott a forrás már az artifacts/ mappa tartalma, de ha oda valami kívülről
+  került (vagy a kinyerés régebbi verzióval futott), nincs második védvonal.
+
+  Ez a projekt központi állítását érinti ("az LLM kimenet nem megbízható"):
+  a fájlrendszer-írás határán ezt kódnak is ki kell kényszerítenie, nem csak
+  a human reviewnak. Egy bíráló pontosan ezt fogja keresni.
+
+  Megoldás: egyetlen, tesztelhető guard a Scaffold.Application rétegben,
+  mindkét írási pont ezen keresztül oldja fel a célútvonalat.
+
+files_to_create:
+  - path: DevScaffold/Scaffold.Application/Artifacts/ArtifactPathGuard.cs
+    content: |
+      (Apache license header a többi fájl mintájára.)
+
+      namespace Scaffold.Application.Artifacts;
+
+      /// <summary>
+      /// Resolves a relative path that originates from untrusted input (LLM output)
+      /// against a root directory, and guarantees the result stays inside that root.
+      ///
+      /// Rejects:
+      ///   - rooted/absolute paths ("C:\x", "/x", "\\server\share\x")
+      ///   - paths that escape the root via ".." segments
+      ///   - empty or whitespace-only paths
+      /// </summary>
+      public static class ArtifactPathGuard
+      {
+          /// <summary>
+          /// Returns true and the full target path if <paramref name="relativePath"/>
+          /// resolves to a location inside <paramref name="rootDirectory"/>.
+          /// </summary>
+          public static bool TryResolveWithin(
+              string rootDirectory,
+              string relativePath,
+              [NotNullWhen(true)] out string? fullPath)
+          {
+              fullPath = null;
+
+              if (string.IsNullOrWhiteSpace(relativePath) || Path.IsPathRooted(relativePath))
+                  return false;
+
+              var root = Path.GetFullPath(rootDirectory);
+              var candidate = Path.GetFullPath(Path.Combine(root, relativePath));
+
+              // GetRelativePath handles case sensitivity per platform and
+              // avoids the "C:\root" vs "C:\root-other" prefix-matching pitfall.
+              var relativeToRoot = Path.GetRelativePath(root, candidate);
+
+              if (relativeToRoot == ".." ||
+                  relativeToRoot.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+                  relativeToRoot.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal) ||
+                  Path.IsPathRooted(relativeToRoot))
+                  return false;
+
+              fullPath = candidate;
+              return true;
+          }
+      }
+
+      Szükséges using: System.Diagnostics.CodeAnalysis.
+
+files_to_modify:
+  - path: DevScaffold/Scaffold.Application/Artifacts/CodingOutputExtractor.cs
+    change: |
+      A foreach ciklusban a Path.Combine helyett:
+
+        if (!ArtifactPathGuard.TryResolveWithin(artifactsRoot, artifact.RelativeFilePath, out var targetPath))
+        {
+            _console.WriteValidation(
+                $"[POST] Artifact skipped – unsafe path outside artifacts/: \"{artifact.RelativeFilePath}\"");
+            skipped++;
+            continue;
+        }
+
+      - Számold a kihagyott artifactokat; a záró üzenet jelezze: "{written} written, {skipped} skipped".
+      - A kihagyás NEM dob kivételt (a post-processor hibája nem invalidálja az elfogadott kimenetet —
+        ez meglévő ADR döntés).
+      - WriteValidation (sárga) szint, mert a humannak látnia kell.
+
+  - path: DevScaffold/Scaffold.CLI/Program.cs
+    change: |
+      Az ApplyAsync-ben (vagy a task_04 után az ArtifactApplier-ben) a
+      targetPath képzése legyen:
+
+        if (!ArtifactPathGuard.TryResolveWithin(config.ProjectRoot, relativePath, out var targetPath))
+        {
+            // hiba kiírása, a fájl kihagyása, a futás folytatódik
+            continue;
+        }
+
+      Ha a task_04 már lefutott, ezt a módosítást az ArtifactApplier-ben végezd el,
+      ne a Program.cs-ben.
+
+  - path: DevScaffold/Scaffold.CLI/ADR-CLI.md
+    change: |
+      Új döntés a meglévő számozás folytatásaként:
+
+        ### N. Artifact paths are untrusted input
+
+        **Decision:** Every file path derived from LLM output is resolved through
+        `ArtifactPathGuard.TryResolveWithin` before any filesystem write — both when
+        extracting into `artifacts/` and when `--apply` copies into `project_root`.
+        Rooted paths and paths escaping the root via `..` are skipped with a visible warning.
+
+        **Rationale:**
+        - The `// filepath:` hint is generated by the model — it is data, not a trusted instruction
+        - `Path.Combine` silently discards the root when the second argument is absolute
+        - Human review of the markdown does not reliably catch a malicious or hallucinated path
+        - Defense in depth: `--apply` re-validates even though extraction already did
+
+      Frissítsd az ADR "Updated" dátumát a mai napra.
+
+acceptance_criteria:
+  - "ArtifactPathGuard létezik, public static, a Scaffold.Application.Artifacts namespace-ben"
+  - "\"src/Services/Foo.cs\" → true, a root alatti teljes útvonallal"
+  - "\"../x.cs\", \"src/../../x.cs\", abszolút útvonal, üres string → false"
+  - "Egy \"root-other\" testvérmappába mutató útvonal → false (nincs prefix-illesztési hiba)"
+  - "A CodingOutputExtractor és az --apply sehol nem használ közvetlen Path.Combine-t LLM eredetű útvonallal"
+  - "Nem biztonságos útvonalnál a futás nem áll le, a konzolon sárga figyelmeztetés jelenik meg"
+  - "Az ADR-CLI tartalmazza az új döntést"
+  - "A solution lefordul hibák nélkül"

@@ -43,7 +43,7 @@ public sealed class TaskBreakdownValidatorTests
     {
         var violations = _validator.Validate(ValidTwoTaskOutput, ruleSet: null);
 
-        Assert.AreEqual(0, violations.Count);
+        Assert.IsEmpty(violations);
     }
 
     [TestMethod]
@@ -63,7 +63,7 @@ public sealed class TaskBreakdownValidatorTests
         var violations = _validator.Validate(output, ruleSet: null);
 
         var missing = violations.Where(v => v.RuleId == "MISSING_REQUIRED_FIELD").ToList();
-        Assert.AreEqual(1, missing.Count);
+        Assert.HasCount(1, missing);
         StringAssert.Contains(missing[0].Description, "Task 1");
     }
 
@@ -95,7 +95,7 @@ public sealed class TaskBreakdownValidatorTests
         // "Owner" required field missing from both tasks – "Description"/"Affected files"
         // are no longer checked because the rule set overrides the defaults.
         var missing = violations.Where(v => v.RuleId == "MISSING_REQUIRED_FIELD").ToList();
-        Assert.AreEqual(2, missing.Count);
+        Assert.HasCount(2, missing);
         Assert.IsTrue(missing.All(v => v.Description.Contains("Owner")));
     }
 

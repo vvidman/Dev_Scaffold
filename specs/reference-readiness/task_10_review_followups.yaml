@@ -1,0 +1,167 @@
+task_id: "10"
+title: "Utóellenőrzés javításai — README, követett lokális fájlok, liveness heartbeat, apróságok"
+depends_on: ["01", "03", "05", "06", "07", "08"]
+
+description: |
+  A 01–09 taskok utáni átnézés (GitHub main, 8ecf2a4) eredménye.
+  A kód-oldali munka jó: path guard, observed fire-and-forget, ArtifactApplier,
+  70 teszt, zöld CI mindkét OS-en, a magyar szöveg eltűnt a kódból.
+  A hiányosságok:
+
+  A) A README.md egyáltalán nem változott (git diff ac1a236..HEAD -- README.md üres).
+     Emiatt hiányzik: CI badge (06), elnevezési bekezdés + protobuf sor + ADR-Validation
+     link (07), Reading Guide, Step Lifecycle, Trade-offs, Development Process (08),
+     tesztek a Project Statusban (05). A CLAUDE.md és az ADR-Protocol #10 már hivatkozik
+     a README "Trade-offs and Known Limitations" szakaszára, ami nem létezik.
+     A specs/README.md és a specs/reference-readiness/ sincs a repóban.
+
+  B) Két lokális fájl továbbra is követett:
+     - DevScaffold/Scaffold.CLI/Scaffold.CLI.yaml (D:\Work\... útvonalak) — a .gitignore
+       bejegyzés megvan, de a `git rm --cached` elmaradt.
+     - .claude/settings.local.json (lokális Claude Code jogosultságok, /d/Work/... útvonalak).
+
+  C) Liveness timeout — hamis riasztás kockázata (a task_03 specifikáció hibája volt:
+     azt feltételezte, hogy a ServiceHost 30 másodpercenként MINDIG küld eseményt).
+     Valójában két hosszú csendes szakasz van egy request_id-ra:
+       1. InferenceStarted után a GetOrLoadAsync (modellbetöltés, CPU-n 30–60 s+,
+          nagyobb modellnél több) — a progress timer ekkor még el sem indult.
+          A ModelStatusChangedEvent üres request_id-val megy ki, így a CLI nem veszi
+          életjelnek.
+       2. Prompt feldolgozás (prefill) alatt tokens == 0: a RunProgressTimerAsync csak
+          az ELSŐ tickben küld üzenetet, utána az első tokenig hallgat. Hosszú,
+          fájlokkal bővített input CPU-n könnyen > 90 s.
+     Következmény: a CLI TimeoutException-nel kilép, miközben a ServiceHost dolgozik
+     tovább, és a következő --step "already running" hibát kap.
+
+  D) Apróságok: TimeoutException a generikus "Unexpected error" ágba esik stack trace-szel;
+     ADR-CLI #5 még a CLI-ben sorolja a generációszámítást; a CI 22 warningot ad
+     (Node 20 alapú action verziók, MSTest analyzer javaslatok).
+
+files_to_modify:
+  - path: "(git állapot) — ELŐSZÖR EZT"
+    change: |
+      Futtasd: git status
+      Ha a README.md, specs/README.md, specs/reference-readiness/ lokálisan módosítva /
+      létezik, csak nincs commitolva: ellenőrizd a task_05–08 README-kritériumai szerint,
+      majd commitold. Ha NEM léteznek, hajtsd végre a task_05 (README rész), task_06
+      (badge), task_07 (README rész) és task_08 teljes README + specs/README.md részét.
+      A task_08 Trade-offs táblázatába a C) pont javítása után kerüljön be a
+      liveness sor is (lásd lent).
+
+  - path: DevScaffold/Scaffold.CLI/Scaffold.CLI.yaml
+    change: |
+      git rm --cached DevScaffold/Scaffold.CLI/Scaffold.CLI.yaml
+      (a lokális fájl megmarad). A history-t nem írjuk át; a fájlban nincs titok,
+      csak gépspecifikus útvonal.
+
+  - path: .claude/settings.local.json
+    change: |
+      git rm --cached .claude/settings.local.json
+      .gitignore-ba:
+        ## Local Claude Code settings
+        .claude/settings.local.json
+      (Ha van közös, commitolandó .claude/settings.json, az maradhat.)
+
+  - path: DevScaffold/Scaffold.ServiceHost/InferenceWorker.cs
+    change: |
+      Heartbeat: a ServiceHost minden progress tickben küldjön InferenceProgressEvent-et
+      a teljes inference alatt, a modellbetöltést is beleértve.
+
+      1. A PeriodicTimer + RunProgressTimerAsync indítása kerüljön a GetOrLoadAsync ELÉ
+         (közvetlenül a PublishInferenceStartedAsync után). A timer a teljes
+         betöltés + generálás alatt fut, és a meglévő módon áll le
+         (progressTimer.Dispose() + await progressTask) — a finally ágban is,
+         hogy hiba/megszakítás esetén se maradjon futó task.
+      2. A CountingTextWriter a betöltés után jön létre; a timer egy állapotot olvasson,
+         amely jelzi a fázist. Egyszerű megoldás: egy volatile fázis-mező vagy egy
+         Func<string> státusz-szolgáltató a RunProgressTimerAsync paramétereként.
+         Státuszüzenetek:
+           - betöltés alatt:          "Loading model '{alias}'... {elapsed}s"
+           - betöltve, tokens == 0:   "Processing prompt... {elapsed}s"
+           - tokens > 0:              a meglévő "Generation in progress... | tokens | tok/s" üzenet
+      3. MINDEN tick küldjön eseményt (a startGenMessageSent "csak egyszer" logika megszűnik).
+      A 30 s intervallum és a 90 s CLI timeout így ugyanazt jelenti, amit az ADR állít:
+      három kimaradt heartbeat.
+
+  - path: DevScaffold/Scaffold.Application/InferenceResultHandler.cs
+    change: |
+      Liveness lejáratkor, a TimeoutException dobása ELŐTT küldj egy
+      CancelInferRequest-et az adott request_id-val (best effort, rövid timeouttal,
+      a kivételt elnyelve), hogy a ServiceHost ne dolgozzon tovább egy elhagyott kérésen.
+      Audit log: "reason=inference_liveness_timeout timeout={N}s cancel_sent=true|false".
+
+  - path: DevScaffold/Scaffold.CLI/Program.cs
+    change: |
+      A --step futás catch láncában a generikus Exception ág ELÉ:
+        catch (TimeoutException ex)
+        {
+            scaffoldConsole.WriteError($"[SCAFFOLD ERROR] {ex.Message}");
+            scaffoldConsole.WriteError("[SCAFFOLD] The ServiceHost may be stuck. Try 'DevScaffold shutdown' and run the step again.");
+            return 1;
+        }
+      (Stack trace nélkül — ez várt, kezelt állapot. Az audit logot a handler már megírta.)
+
+  - path: DevScaffold/Scaffold.Application/Scaffold.Application.csproj
+    change: |
+      <ItemGroup><InternalsVisibleTo Include="Scaffold.Tests" /></ItemGroup>
+      (az InferenceResultHandler internal — a liveness viselkedést tesztelni kell)
+
+  - path: DevScaffold/Scaffold.Tests/Application/InferenceResultHandlerLivenessTests.cs
+    change: |
+      Új tesztosztály. IPipeClient, IOutputValidator, IHumanValidationService,
+      IRefinementStrategy, IScaffoldConsole, IAuditLogger → NSubstitute.
+      Az EventReceived eseményt a teszt hívja meg kézzel (a substitute-on a delegate
+      feliratkozását kapd el). Rövid timeout: new InferenceResultHandlerOptions(TimeSpan.FromMilliseconds(300)).
+      - HandleAsync_NoEvents_ThrowsTimeoutAndLogsLivenessTimeout
+      - HandleAsync_ProgressEventsKeepArriving_DoesNotTimeOut
+          (pl. 150 ms-onként progress, összesen > 300 ms, majd InferenceFailed → InvalidOperationException, nem TimeoutException)
+      - HandleAsync_EventsForOtherRequestId_DoNotResetTimer
+      - HandleAsync_TimeoutFires_SendsCancelInferRequest
+      - HandleAsync_HumanValidationSlowerThanTimeout_DoesNotTimeOut
+          (IHumanValidationService.ValidateAsync > 300 ms múlva ad Accept-et; fájl a temp mappában az output path-hoz)
+      Itt a Task.Delay a teszt időzítésének része, ez elfogadható; Thread.Sleep továbbra se legyen.
+
+  - path: DevScaffold/Scaffold.ServiceHost.Tests/InferenceWorkerHeartbeatTests.cs
+    change: |
+      Ha az InferenceWorker ProgressInterval-ja konstruktorban/opcióban megadható,
+      tedd azzá (alapérték 30 s, tesztben 50 ms), és írd meg:
+      - RunAsync_DuringSlowModelLoad_PublishesProgress
+          (IInferenceBackendProvider.GetOrLoadAsync egy késleltetett Task-ot ad vissza)
+      - RunAsync_BeforeFirstToken_PublishesProgressEveryTick
+      Ha a ProgressInterval nem tehető konfigurálhatóvá kis változtatással, hagyd ki
+      ezeket a teszteket, és írd le az összefoglalóban.
+
+  - path: DevScaffold/Scaffold.CLI/ADR-CLI.md
+    change: |
+      1. #5 "What remains in the CLI": a "Generation number computation" sort cseréld:
+         "Generation number computation — via `GenerationCalculator` (Scaffold.Application)"
+      2. #11 Liveness timeout bekezdés: egészítsd ki a cancel-on-timeout viselkedéssel.
+
+  - path: DevScaffold/Scaffold.ServiceHost/ADR-ServiceHost.md
+    change: |
+      #9 "Failure path" után új bekezdés:
+        **Heartbeat:** `InferenceProgressEvent` is sent on every progress tick for the whole
+        request lifetime – model loading, prompt processing and generation – so the CLI's
+        liveness timeout (3 × interval) measures ServiceHost silence, not model speed.
+
+  - path: .github/workflows/ci.yml
+    change: |
+      Az actions/checkout, actions/setup-dotnet, actions/upload-artifact legyen a
+      legfrissebb, Node 24-en futó major verzió (a jelenlegi @v4 Node 20 deprecation
+      warningot ad). Ellenőrizd a verziókat a GitHub oldalukon.
+
+  - path: DevScaffold/Scaffold.Tests/**, DevScaffold/Scaffold.ServiceHost.Tests/**
+    change: |
+      MSTest analyzer warningok megszüntetése (a CI annotációk szerint):
+      - [DataTestMethod] → [TestMethod]
+      - Assert.AreEqual(0, x.Count) → Assert.IsEmpty(x); Assert.AreEqual(n, x.Count) → Assert.HasCount(n, x)
+      Cél: `dotnet build -c Release` 0 warninggal.
+
+acceptance_criteria:
+  - "git diff ac1a236..HEAD -- README.md nem üres, és a README tartalmazza: CI badge, Naming, Reading Guide, Step Lifecycle, Trade-offs and Known Limitations, Development Process, a tesztek említését"
+  - "A README Trade-offs táblázatában a liveness timeout is szerepel (heartbeat-alapú, cancel-on-timeout)"
+  - "specs/README.md és specs/reference-readiness/ a repóban van"
+  - "git ls-files nem listázza a Scaffold.CLI.yaml-t és a .claude/settings.local.json-t; mindkettő lokálisan megvan"
+  - "Élő teszt: egy még be nem töltött modellel indított --step nem ad liveness timeoutot a betöltés és a prefill alatt; a konzolon 30 s-onként megjelenik a fázis-státusz"
+  - "Liveness lejáratkor a CLI stack trace nélkül, érthető üzenettel lép ki (exit 1), és CancelInferRequest-et küld"
+  - "Az új liveness tesztek zöldek; a CI mindkét OS-en zöld, 0 build warninggal és Node-deprecation annotáció nélkül"

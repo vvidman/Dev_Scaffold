@@ -1,4 +1,4 @@
-/*
+﻿/*
 
    Copyright 2026 Viktor Vidman
 
@@ -115,8 +115,10 @@ public sealed class InputAssemblerTests
         StringAssert.Contains(context, "primary");
         StringAssert.Contains(context, "\n\n---\n\n");
         StringAssert.Contains(context, "secondary");
-        Assert.IsTrue(context.IndexOf("primary", StringComparison.Ordinal)
-                      < context.IndexOf("secondary", StringComparison.Ordinal));
+        // IsLessThan(upperBound, value): primary must appear before secondary.
+        Assert.IsLessThan(
+            context.IndexOf("secondary", StringComparison.Ordinal),
+            context.IndexOf("primary", StringComparison.Ordinal));
     }
 
     [TestMethod]

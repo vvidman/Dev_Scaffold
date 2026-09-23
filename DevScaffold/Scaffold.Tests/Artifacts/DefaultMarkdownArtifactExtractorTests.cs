@@ -32,7 +32,7 @@ public sealed class DefaultMarkdownArtifactExtractorTests
     {
         var result = _extractor.Extract("", HintPrefix);
 
-        Assert.AreEqual(0, result.Count);
+        Assert.IsEmpty(result);
     }
 
     [TestMethod]
@@ -42,7 +42,7 @@ public sealed class DefaultMarkdownArtifactExtractorTests
 
         var result = _extractor.Extract(markdown, HintPrefix);
 
-        Assert.AreEqual(1, result.Count);
+        Assert.HasCount(1, result);
         Assert.AreEqual("src/Services/Foo.cs", result[0].RelativeFilePath);
         Assert.AreEqual("public class Foo {}", result[0].Content);
     }
@@ -54,7 +54,7 @@ public sealed class DefaultMarkdownArtifactExtractorTests
 
         var result = _extractor.Extract(markdown, null);
 
-        Assert.AreEqual(1, result.Count);
+        Assert.HasCount(1, result);
         Assert.AreEqual("artifact_01.cs", result[0].RelativeFilePath);
     }
 
@@ -65,7 +65,7 @@ public sealed class DefaultMarkdownArtifactExtractorTests
 
         var result = _extractor.Extract(markdown, HintPrefix);
 
-        Assert.AreEqual(1, result.Count);
+        Assert.HasCount(1, result);
         Assert.AreEqual("artifact_01.cs", result[0].RelativeFilePath);
     }
 
@@ -76,7 +76,7 @@ public sealed class DefaultMarkdownArtifactExtractorTests
 
         var result = _extractor.Extract(markdown, null);
 
-        Assert.AreEqual(1, result.Count);
+        Assert.HasCount(1, result);
         Assert.AreEqual("artifact_01.txt", result[0].RelativeFilePath);
     }
 
@@ -87,7 +87,7 @@ public sealed class DefaultMarkdownArtifactExtractorTests
 
         var result = _extractor.Extract(markdown, null);
 
-        Assert.AreEqual(2, result.Count);
+        Assert.HasCount(2, result);
         Assert.AreEqual("artifact_01.cs", result[0].RelativeFilePath);
         Assert.AreEqual("artifact_02.json", result[1].RelativeFilePath);
     }
@@ -99,7 +99,7 @@ public sealed class DefaultMarkdownArtifactExtractorTests
 
         var result = _extractor.Extract(markdown, null);
 
-        Assert.AreEqual(0, result.Count);
+        Assert.IsEmpty(result);
     }
 
     [TestMethod]
@@ -109,7 +109,7 @@ public sealed class DefaultMarkdownArtifactExtractorTests
 
         var result = _extractor.Extract(markdown, HintPrefix);
 
-        Assert.AreEqual(1, result.Count);
+        Assert.HasCount(1, result);
         Assert.AreEqual("src/Foo.cs", result[0].RelativeFilePath);
         Assert.AreEqual("public class Foo {}", result[0].Content);
     }

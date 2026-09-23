@@ -1,0 +1,99 @@
+task_id: "06"
+title: "GitHub Actions CI — build + test Windowson és Linuxon, badge a README-ben"
+depends_on: ["05"]
+
+description: |
+  A bíráló a repó megnyitásakor elsőként a README tetején lévő badge-eket
+  látja. Egy zöld build + test badge egy kattintással igazolja, hogy a
+  tesztek nem csak lokálisan futnak.
+
+  Mátrix: windows-latest + ubuntu-latest. A termék elsődlegesen Windowson
+  fut (Named Pipes, PowerShell), de a tiszta logika tesztjeinek platformfüggetlennek
+  kell lenniük — a Linux-futás ezt bizonyítja.
+
+  Nincs szükség modellre, GPU-ra, secretre. A LLamaSharp CPU backend
+  csomag lefordul, de a tesztek nem töltenek be modellt.
+
+files_to_create:
+  - path: .github/workflows/ci.yml
+    content: |
+      name: CI
+
+      on:
+        push:
+          branches: [ main ]
+        pull_request:
+          branches: [ main ]
+
+      permissions:
+        contents: read
+
+      concurrency:
+        group: ci-${{ github.ref }}
+        cancel-in-progress: true
+
+      jobs:
+        build-and-test:
+          name: Build & test (${{ matrix.os }})
+          runs-on: ${{ matrix.os }}
+          strategy:
+            fail-fast: false
+            matrix:
+              os: [ windows-latest, ubuntu-latest ]
+
+          steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup .NET
+              uses: actions/setup-dotnet@v4
+              with:
+                dotnet-version: 10.0.x
+                cache: true
+                cache-dependency-path: '**/*.csproj'
+
+            - name: Restore
+              run: dotnet restore DevScaffold/DevScaffold.slnx
+
+            - name: Build
+              run: dotnet build DevScaffold/DevScaffold.slnx --configuration Release --no-restore
+
+            - name: Test
+              run: >
+                dotnet test DevScaffold/DevScaffold.slnx
+                --configuration Release --no-build
+                --logger "trx;LogFileName=test-results.trx"
+                --results-directory TestResults
+
+            - name: Upload test results
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                name: test-results-${{ matrix.os }}
+                path: TestResults/**/*.trx
+
+      Megjegyzések Claude Code-nak:
+      - Az action verziókat ellenőrizd (a legfrissebb major verzió legyen).
+      - Ha a `cache: true` NuGet cache lock file-t igényel és az nincs a repóban,
+        hagyd el a cache beállítást, NE generálj lock file-t csak ezért.
+      - Ha a dotnet test a .slnx-szel az adott SDK-n nem működik, használd a
+        két tesztprojekt csproj-ját közvetlenül.
+
+files_to_modify:
+  - path: README.md
+    change: |
+      A cím alá, első sorként:
+
+        [![CI](https://github.com/vvidman/Dev_Scaffold/actions/workflows/ci.yml/badge.svg)](https://github.com/vvidman/Dev_Scaffold/actions/workflows/ci.yml)
+        ![.NET 10](https://img.shields.io/badge/.NET-10-512BD4)
+        ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+
+  - path: DevScaffold/DevScaffold.slnx
+    change: |
+      A /Solution Items/ mappába vedd fel a ../.github/workflows/ci.yml fájlt.
+
+acceptance_criteria:
+  - "A workflow push-ra és PR-ra fut a main ágon"
+  - "Mindkét OS-en zöld a build és a test lépés"
+  - "A workflow csak contents: read jogosultsággal fut"
+  - "A README tetején megjelenik a CI badge"
+  - "Lokálisan: `dotnet build -c Release` és `dotnet test -c Release --no-build` ugyanazzal az eredménnyel fut"

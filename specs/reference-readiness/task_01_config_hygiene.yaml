@@ -1,0 +1,127 @@
+task_id: "01"
+title: "Konfigurációs higiénia — példa CLI yaml, gitignore, DevScaffold assembly név"
+depends_on: []
+
+description: |
+  A repóba committolt Scaffold.CLI.yaml gépspecifikus abszolút útvonalakat
+  (D:\Work\...) és egy konkrét projekt nevét ("Expense Tracker Project") tartalmazza.
+  Referencia-repóban ez az első, ami egy bírálónak feltűnik.
+
+  Emellett a README és az ADR-ek `DevScaffold --step ...` parancsot mutatnak,
+  a CLI assembly neve viszont Scaffold.CLI, így a dokumentált parancs nem
+  létezik. Ezt a csproj AssemblyName-mel igazítjuk a dokumentációhoz.
+
+  FIGYELEM: a GetCliConfigPath() jelenleg az exe nevéből képzi a yaml nevét
+  (Path.ChangeExtension(exePath, ".yaml")). Ha az assembly DevScaffold lesz,
+  a CLI DevScaffold.yaml-t keresne. Ezért a config fájlnevet fixre állítjuk:
+  mindig "Scaffold.CLI.yaml" az exe mappájában.
+
+  Döntések:
+  - A valódi Scaffold.CLI.yaml gitignore-ba kerül (lokális, gépspecifikus).
+  - A repóba Scaffold.CLI.example.yaml kerül, relatív útvonalakkal.
+  - A CLI assembly neve DevScaffold. A projekt- és namespace-nevek (Scaffold.CLI) maradnak.
+
+files_to_create:
+  - path: DevScaffold/Scaffold.CLI/Scaffold.CLI.example.yaml
+    content: |
+      # ─────────────────────────────────────────────
+      # Scaffold.CLI.example.yaml – project-level CLI configuration (example)
+      #
+      # Copy this file to Scaffold.CLI.yaml next to the DevScaffold executable
+      # and adjust the paths. Scaffold.CLI.yaml is git-ignored on purpose:
+      # it contains machine-specific paths.
+      # ─────────────────────────────────────────────
+
+      # Path to the ServiceHost binary (relative to the CLI executable, or absolute).
+      host_binary_path: ./Scaffold.ServiceHost
+
+      # Model registry: maps model aliases to GGUF files or OpenAI-compatible endpoints.
+      models: ./models.yaml
+
+      # Named Pipe identifier – also used as the project name.
+      # Spaces are allowed; they become "_" in the output folder name.
+      pipe_name: MyProject
+
+      # Output root. Structure: {output}/{pipe_name}/{step_name}_{generation}/
+      output: ./output
+
+      # Main project context – the base input of every step.
+      project_context: ./inputs/input.yaml
+
+      # Target project root for --apply. Required only when using --apply.
+      # project_root: ../MyActualProject/
+
+      # ─────────────────────────────────────────────
+      # Step definitions
+      # Each key is a step name – pass it to --step, e.g. "DevScaffold --step task_breakdown"
+      # ─────────────────────────────────────────────
+      steps:
+        task_breakdown:
+          input_config:     ./inputs/task_breakdown_agent.yaml
+          validator_config: ./inputs/task_breakdown_validator.yaml   # optional
+          model_alias:      local-reasoning
+
+        coding:
+          input_config: ./inputs/coding_agent.yaml
+          model_alias:  local-coder
+
+files_to_modify:
+  - path: .gitignore
+    change: |
+      A fájl létezik. A végére add hozzá:
+
+        ## Machine-specific CLI configuration – see Scaffold.CLI.example.yaml
+        DevScaffold/Scaffold.CLI/Scaffold.CLI.yaml
+
+      A meglévő magyar szekciókommenteket fordítsd angolra
+      (pl. "## Build output" marad, "## Teszteredmények" → "## Test results").
+
+  - path: DevScaffold/Scaffold.CLI/Scaffold.CLI.yaml
+    change: |
+      Vedd ki a git követésből, de a lokális fájlt NE töröld és NE módosítsd:
+        git rm --cached DevScaffold/Scaffold.CLI/Scaffold.CLI.yaml
+
+  - path: DevScaffold/Scaffold.CLI/Scaffold.CLI.csproj
+    change: |
+      1. A PropertyGroup-ba:
+           <AssemblyName>DevScaffold</AssemblyName>
+      2. A meglévő <None Update="Scaffold.CLI.yaml"> maradjon (ha a fájl hiányzik, no-op).
+         Mellé:
+           <None Update="Scaffold.CLI.example.yaml">
+             <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+           </None>
+
+  - path: DevScaffold/Scaffold.CLI/Program.cs
+    change: |
+      1. GetCliConfigPath() ne az exe nevéből képezze a yaml nevét:
+
+           private const string CliConfigFileName = "Scaffold.CLI.yaml";
+
+           static string GetCliConfigPath() =>
+               Path.Combine(AppContext.BaseDirectory, CliConfigFileName);
+
+         (Top-level statements esetén a const helyett egy lokális
+         `const string CliConfigFileName` is megfelel — igazodj a fájl szerkezetéhez.)
+         Frissítsd a metódus XML kommentjét.
+
+      2. Ha a config fájl nem létezik, a hibaüzenet mondja meg, mit kell tenni:
+           "[SCAFFOLD ERROR] Scaffold.CLI.yaml not found at {path}. " +
+           "Copy Scaffold.CLI.example.yaml to Scaffold.CLI.yaml and adjust the paths."
+         Exit code: 1. Ha már van ilyen ellenőrzés, csak az üzenetet cseréld.
+
+  - path: "(repó-szintű keresés)"
+    change: |
+      Keresd meg a "Scaffold.CLI.exe" előfordulásait és a Scaffold.CLI-t mint
+      futtatható nevet (README.md, README.Run.md, PowerShell szkriptek, yaml
+      kommentek, Program.cs üzenetek), és igazítsd DevScaffold-ra.
+      A projekt-, mappa- és namespace-neveket NE nevezd át.
+      A `dotnet run --project DevScaffold/Scaffold.CLI` hivatkozások helyesek, maradnak.
+
+acceptance_criteria:
+  - "`git grep -n \"D:\\\\\\\\\"` nem ad találatot követett fájlban (a git history-t nem írjuk át)"
+  - "Scaffold.CLI.example.yaml létezik, angol kommentekkel és relatív útvonalakkal"
+  - "Scaffold.CLI.yaml nincs a git indexben, de lokálisan változatlanul megvan"
+  - "`dotnet build` után a CLI kimeneti mappájában DevScaffold(.exe) keletkezik"
+  - "A lefordított DevScaffold a mellette lévő Scaffold.CLI.yaml-t olvassa be (a meglévő lokális configgal egy --step futás működik)"
+  - "Hiányzó Scaffold.CLI.yaml esetén exit 1 és a fenti angol üzenet"
+  - "A solution lefordul hibák és új warningok nélkül"

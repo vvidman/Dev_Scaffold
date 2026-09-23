@@ -1,0 +1,171 @@
+task_id: "07"
+title: "Dokumentáció — validációs elvek angolul ADR-ként, egységes elnevezés, pontatlanságok javítása"
+depends_on: ["01", "05"]
+
+description: |
+  A dokumentáció szerkezete jó, de néhány ponton pontatlan vagy inkonzisztens.
+  Egy bíráló ezekből következtet a precizitásra.
+
+  1. A legerősebb gondolati anyag (DevScaffold/scaffold_validation_principles.md)
+     magyarul van, miközben a README és a CLAUDE.md angol dokumentumként linkeli.
+     AI Platform / LLMOps szerephez ez a legrelevánsabb dokumentum
+     (nemdeterminisztikusság, szükséges és elégséges feltételek, LLM-as-judge
+     korlátai, violation rate mint mérőszám). Angolra fordítjuk, és ADR-formát kap.
+
+  2. Elnevezés: a README "DevScaffold"-ot, az ADR-ek "Scaffold Protocol"-t, a repó
+     "Dev_Scaffold"-ot használ. Döntés:
+       - Scaffold Protocol = a módszertan / koncepció (human-in-the-loop, step-alapú munkafolyamat)
+       - DevScaffold       = az eszköz (a CLI + ServiceHost implementáció)
+     Ezt egyszer, explicit kimondjuk a README-ben, és mindenhol ehhez igazodunk.
+
+  3. Pontatlanságok, amelyeket javítani kell (lásd files_to_modify).
+
+  Stílus: tömör, tényszerű angol; a meglévő ADR-ek formátumát kövesd
+  (**Decision:** / **Rationale:** blokkok, --- elválasztók).
+  Ne szépíts: ami nincs implementálva, legyen explicit jelölve.
+
+files_to_create:
+  - path: DevScaffold/Scaffold.Validation/ADR-Validation.md
+    content: |
+      A scaffold_validation_principles.md TELJES tartalmának hű angol fordítása,
+      ADR-keretbe rendezve. Semmit ne hagyj ki, semmit ne tegyél hozzá tartalmilag,
+      kivéve az alábbi "Implementation status" jelöléseket.
+
+      Szerkezet:
+
+        # ADR – Output Validation: Principles and Approach
+
+        **Date:** (az eredeti fájl első commitjának dátuma: `git log --diff-filter=A --format=%as -- DevScaffold/scaffold_validation_principles.md`)
+        **Updated:** (mai dátum)
+        **Status:** Accepted
+        **Affected projects:** Scaffold.Validation, Scaffold.Validation.Steps,
+        Scaffold.Validation.Abstractions, Scaffold.Application (RefinementStrategy, InferenceResultHandler)
+
+        ## Context
+          (eredeti 1. szakasz: az LLM kimenet nem determinisztikus; a cél a biztosan
+           rossz kimenetek kiszűrése, nem a determinizmus; analógia a szoftverteszteléssel)
+
+        ## Decisions
+          ### 1. Validators check necessary conditions, not sufficient ones
+               (eredeti 2. szakasz, a táblázattal és a "Golden rule" idézettel)
+          ### 2. Only automate what is certainly wrong
+               (eredeti 3.1 – túl szigorú validátor → false positive, végtelen refinement loop)
+          ### 3. No LLM-as-judge for content correctness
+               (eredeti 3.2)
+          ### 4. Incremental validation infrastructure
+               (eredeti 3.3)
+          ### 5. Error-driven refinement, not retry
+               (eredeti 4. szakasz, a példa refinement prompttal)
+          ### 6. Violations are data – quality becomes measurable
+               (eredeti 5. szakasz, az aggregált mérés példájával)
+
+        ## Validation layers
+          (eredeti 6. szakasz ASCII diagramja, angol feliratokkal)
+
+        ## What this does not solve
+          (eredeti 7. szakasz)
+
+        ## Implementation status
+          | Element | Status |
+          |---|---|
+          | Universal validator (empty output, stop token, truncation, token-limit proximity) | Implemented – `UniversalOutputValidator` |
+          | Per-step structural validator | Implemented for `task_breakdown` – `TaskBreakdownValidator` |
+          | Declarative rules from YAML | Implemented – `ValidatorYamlReader`, `ValidatorRuleSet` |
+          | Error-driven refinement with `FixHint` and `[AUTO]` prefix | Implemented – `RefinementStrategy` |
+          | Violation logging | Implemented – per-generation `audit.log` (key=value, parser-friendly) |
+          | Roslyn compile check for generated C# | **Planned** – not implemented |
+          | Violation-rate aggregation across runs | **Planned** – data is in `audit.log`; no aggregation tooling yet |
+          | LLM judge for routing UNCERTAIN cases to the human | **Not planned** as a decision-maker (see Decision 3) |
+
+          FONTOS: az eredeti szövegben ahol a Roslyn a per-step validator részeként
+          szerepel (pl. a 6. szakasz diagramjában és a 2. szakasz táblázatában),
+          jelöld "(planned)"-ként.
+          A táblázat minden "Implemented" sorát ellenőrizd a kódban — ha valami
+          nem így van, a táblázat a valóságot tükrözze.
+
+        ## Related ADRs
+          - ADR-CLI – #12 (rejected output is not fed back), audit log (#17)
+          - ADR-Protocol – InferenceCompletedEvent.tokens_generated (a token-limit proximity check bemenete)
+
+files_to_modify:
+  - path: DevScaffold/scaffold_validation_principles.md
+    change: |
+      Töröld (git rm). A tartalma az ADR-Validation.md-ben él tovább.
+
+  - path: DevScaffold/DevScaffold.slnx
+    change: |
+      A /Solution Items/ mappában a scaffold_validation_principles.md helyett
+      a Scaffold.Validation/ADR-Validation.md szerepeljen. Vedd fel mellé a három
+      másik ADR-t is (ADR-Protocol, ADR-CLI, ADR-ServiceHost), hogy a solution-ből
+      egy helyen elérhetők legyenek.
+
+  - path: CLAUDE.md
+    change: |
+      - "See `scaffold_validation_principles.md`" → "See `Scaffold.Validation/ADR-Validation.md`"
+      - Az "## ADRs" listába vedd fel:
+          - `Scaffold.Validation/ADR-Validation.md` — validator scope, error-driven refinement, what is and isn't automated
+
+  - path: README.md
+    change: |
+      1. Elnevezés — a "Why This Exists" szakasz elé egy rövid bekezdés:
+
+           > **Naming.** *Scaffold Protocol* is the workflow concept: step-based,
+           > human-orchestrated AI generation with explicit review checkpoints.
+           > *DevScaffold* is this repository's implementation of it (CLI + ServiceHost).
+
+      2. Tech Stack sor javítása:
+           "**Protocol Buffers (protobuf-net / Google.Protobuf)**"
+         helyett:
+           "**Protocol Buffers (Google.Protobuf, code generated by Grpc.Tools – no gRPC runtime)** — IPC serialization"
+         (Ellenőrizd: a Scaffold.Agent.Protocol.csproj Google.Protobuf-ot és Grpc.Tools-t
+          használ GrpcServices="None"-nal; protobuf-net nincs a solutionben.
+          Ha mégis van, a sor maradjon eredeti formájában.)
+
+      3. A "Key Design Decisions" listába vedd fel utolsó előtti elemként:
+
+           - **Validators check necessary conditions, never sufficient ones.** A validator
+             failure means the output is certainly wrong; a pass only means it *may* be right —
+             content correctness is always a human decision. No LLM-as-judge for content.
+             → [ADR-Validation](DevScaffold/Scaffold.Validation/ADR-Validation.md)
+
+      4. Minden README-link ellenőrzése: minden relatív link létező fájlra mutasson
+         (a task_01 és task_02 után is).
+
+  - path: DevScaffold/Scaffold.ServiceHost/ADR-ServiceHost.md
+    change: |
+      "Related ADRs" szakasz: "**ADR-CLI-Refactor**" → "**[ADR-CLI](../Scaffold.CLI/ADR-CLI.md)**",
+      és az ADR-Protocol hivatkozás is legyen link: "[ADR-Protocol](../Scaffold.Agent.Protocol/ADR-Protocol.md)".
+      Az első bekezdésben a "Scaffold Protocol human-in-the-loop pipeline model"
+      kifejezés helyes (koncepcióra utal) — maradjon.
+
+  - path: DevScaffold/Scaffold.CLI/ADR-CLI.md
+    change: |
+      1. Az "Updated" dátum nem tükrözi a 4. refaktort (post-processing, --input, --apply),
+         pedig a szövegben már benne van. A Context szakaszba vegyél fel egy
+         bekezdést a negyedik körről, a többi kör mintájára:
+
+           The fourth refactor round (<dátum a git logból: a CodingOutputExtractor.cs első commitja>)
+           introduced post-processing and artifact handling:
+           - `IStepPostProcessor` pipeline with `PostProcessorContext` – runs after Accept/Edit
+           - `CodingOutputExtractor` stages generated code in `artifacts/`; `--apply` copies it into `project_root`
+           - `--input` adds a per-task secondary input next to the global `project_context`
+
+         Az "Updated" dátum legyen a mai nap.
+      2. A dokumentum elején a cím maradhat "ADR – Scaffold CLI Refactor", de a README és
+         a CLAUDE.md "ADR-CLI" néven hivatkozik rá — ez rendben van, ne nevezd át a fájlt.
+
+  - path: DevScaffold/Scaffold.Agent.Protocol/ADR-Protocol.md
+    change: |
+      A #10 (ServiceReadyEvent) döntésnél a `version` mezőről: "useful for future
+      compatibility checks" — egészítsd ki egy mondattal, hogy a CLI jelenleg
+      NEM ellenőrzi a verziót (ha a kód alapján valóban nem), és ez a
+      README "Known limitations" szakaszában szerepel (task_08).
+
+acceptance_criteria:
+  - "A repóban nincs magyar nyelvű .md dokumentáció a DevScaffold/ mappában (a specs/ mappa kivétel — lásd task_08)"
+  - "ADR-Validation.md tartalmazza az eredeti dokumentum összes szakaszát angolul, és az Implementation status táblázat a kóddal egyezik"
+  - "A Roslyn-ellenőrzés mindenhol 'planned'-ként szerepel"
+  - "A README elnevezési bekezdése létezik; a Tech Stack protobuf sora a tényleges csomagokat nevezi meg"
+  - "Nincs törött relatív link a README-ben, a CLAUDE.md-ben és az ADR-ekben"
+  - "Az ADR-CLI Context szakasza leírja a negyedik refaktor kört"
+  - "A solution lefordul (a slnx Solution Items frissítés után is)"

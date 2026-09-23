@@ -39,7 +39,7 @@ public sealed class RefinementStrategyTests
 
         var clarification = _strategy.BuildAutoRejectionClarification(result);
 
-        Assert.IsTrue(clarification.StartsWith("[AUTO]"));
+        Assert.StartsWith("[AUTO]", clarification);
         StringAssert.Contains(clarification, "[STOP_TOKEN_LEAKED] Remove the stop token.");
         StringAssert.Contains(clarification, "[EMPTY_OUTPUT] Regenerate the output.");
     }
@@ -84,7 +84,7 @@ public sealed class RefinementStrategyTests
 
         var prompt = _strategy.BuildRefinedSystemPrompt(logger, "ORIGINAL_PROMPT_TEXT", "clarification");
 
-        Assert.IsTrue(prompt.StartsWith("ORIGINAL_PROMPT_TEXT"));
+        Assert.StartsWith("ORIGINAL_PROMPT_TEXT", prompt);
     }
 
     [TestMethod]

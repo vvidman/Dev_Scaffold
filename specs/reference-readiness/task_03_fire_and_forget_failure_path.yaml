@@ -1,0 +1,156 @@
+task_id: "03"
+title: "Fire-and-forget inference — a hibaág valóban jusson el a CLI-hez"
+depends_on: []
+
+description: |
+  HIBAJAVÍTÁS. A CommandDispatcher.HandleInferAsync jelenlegi alakja:
+
+    try
+    {
+        _ = Task.Run(async () => await _inferenceWorker.RunAsync(request, cancellationToken),
+                     cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        await _eventPublisher.PublishInferenceFailedAsync(...);
+    }
+
+  A catch ág gyakorlatilag halott kód: a Task.Run azonnal visszatér, a
+  futás közbeni kivételek a eldobott Task-ban maradnak (unobserved exception).
+  Konkrét hibaesetek, amelyekben SEMMILYEN esemény nem megy ki a CLI felé:
+
+  1. Már fut egy inference → az InferenceWorker.RunAsync InvalidOperationException-t
+     dob, mielőtt bármit publikálna.
+  2. Az ExecuteInferenceAsync-ben a PublishInferenceStartedAsync a try blokkon
+     KÍVÜL van → ha az dob, a kivétel szintén elvész.
+
+  A CLI oldalon az InferenceResultHandler.HandleAsync csak
+  completionTcs.Task.WaitAsync(cancellationToken)-nel vár → időkorlát nélkül,
+  a végtelenségig lóg.
+
+  Az ADR-ServiceHost #9 és a README kiemelt design döntésként mutatja be a
+  fire-and-forget mintát. Egy senior bíráló elsőként azt kérdezi meg:
+  "és mi történik a kivételekkel?" Erre a kódnak kell válaszolnia.
+
+  A javítás két rétegű:
+  A) ServiceHost: a háttérfeladat minden kivétele InferenceFailedEvent-té alakul.
+  B) CLI: liveness időkorlát — ha adott ideig semmilyen esemény nem érkezik
+     az adott request_id-ra, a lépés hibával zárul, nem lóg.
+
+  Mielőtt módosítasz, olvasd végig az InferenceWorker.ExecuteInferenceAsync
+  catch ágait. Ha azok már publikálnak InferenceFailed/Cancelled eseményt és
+  NEM dobják tovább a kivételt, akkor az A) wrapper csak a kiszökő kivételeket
+  kapja el — nem lesz dupla esemény. Ha továbbdobják, a wrapper NE publikáljon
+  még egyszer (jelöld meg a már publikált hibát, pl. dedikált kivételtípussal
+  vagy egy bool visszatérési értékkel — a legkisebb invazív megoldást válaszd,
+  és indokold kommentben).
+
+files_to_modify:
+  - path: DevScaffold/Scaffold.ServiceHost/CommandDispatcher.cs
+    change: |
+      A HandleInferAsync-et cseréld le egy megfigyelt háttérfeladatra:
+
+        private Task HandleInferAsync(InferRequest request, CancellationToken cancellationToken)
+        {
+            // Fire-and-forget by design (ADR-ServiceHost #9): the command loop must stay
+            // responsive so CancelInferRequest can arrive. The background task is still
+            // *observed*: every failure is converted into an InferenceFailedEvent.
+            _ = RunInferenceObservedAsync(request, cancellationToken);
+            return Task.CompletedTask;
+        }
+
+        private async Task RunInferenceObservedAsync(InferRequest request, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await Task.Run(() => _inferenceWorker.RunAsync(request, cancellationToken), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Service shutdown – InferenceWorker publishes the cancellation itself.
+            }
+            catch (Exception ex)
+            {
+                await TryPublishFailureAsync(request, ex);
+            }
+        }
+
+        private async Task TryPublishFailureAsync(InferRequest request, Exception ex)
+        {
+            try
+            {
+                // CancellationToken.None: the failure must be reported even if the
+                // request token is already cancelled.
+                await _eventPublisher.PublishInferenceFailedAsync(
+                    request.RequestId, request.StepId, ex.Message, CancellationToken.None);
+            }
+            catch (Exception publishEx)
+            {
+                // Event pipe is gone (CLI disconnected). Nothing else can be done here.
+                Console.Error.WriteLine(
+                    $"[ServiceHost ERROR] Could not publish InferenceFailed for {request.RequestId}: {publishEx.Message}");
+            }
+        }
+
+      A DispatchAsync switch ágában az `await HandleInferAsync(...)` maradhat.
+
+  - path: DevScaffold/Scaffold.ServiceHost/InferenceWorker.cs
+    change: |
+      Az ExecuteInferenceAsync-ben a PublishInferenceStartedAsync hívást vidd
+      a try blokkon BELÜLRE, hogy az ottani hibakezelés azt is lefedje.
+      Más viselkedést ne változtass.
+
+  - path: DevScaffold/Scaffold.Application/InferenceResultHandler.cs
+    change: |
+      Liveness időkorlát a CLI oldalon.
+
+      1. Új opcionális beállítás: `InferenceLivenessTimeout` (TimeSpan).
+         Alapérték: 3 × a ServiceHost progress intervalluma = 90 másodperc
+         (a progress 30 mp-enként érkezik, lásd ADR-Protocol #13).
+         Konstruktorparaméterként vagy egy kis options rekordon keresztül kapja,
+         DI-ban regisztrálva — NE hardkódold a HandleAsync-be.
+
+      2. Minden, az adott request_id-hoz tartozó esemény (Started, Progress,
+         Completed, Cancelled, Failed) újraindítja az időzítőt.
+         Megvalósítás: egy CancellationTokenSource, amelyen minden eseménynél
+         CancelAfter(timeout)-ot hívsz; a completionTcs.Task.WaitAsync a
+         linkelt tokent kapja.
+
+      3. Ha a liveness időkorlát lejár (és nem a hívó tokenje szakította meg):
+         - audit log: AuditEvent.Error, "reason=inference_liveness_timeout timeout={N}s"
+         - TimeoutException dobása érthető angol üzenettel, pl.
+           "No event received from ServiceHost for request {id} within {N}s."
+         A Program.cs meglévő hibakezelése ezt exit 1-ként kezeli — ellenőrizd.
+
+      4. FONTOS: a human validáció (Accept/Edit/Reject prompt) ideje alatt az
+         időzítő NEM futhat — a human gondolkodási ideje nem hiba. Az időzítőt
+         állítsd le (pl. CancelAfter(Timeout.InfiniteTimeSpan)) közvetlenül az
+         InferenceCompleted feldolgozásának kezdetén.
+
+  - path: DevScaffold/Scaffold.ServiceHost/ADR-ServiceHost.md
+    change: |
+      A #9 döntést egészítsd ki egy "Failure path" alszakasszal:
+
+        **Failure path:** The background task is fire-and-forget, but not unobserved.
+        `RunInferenceObservedAsync` converts every escaping exception (including the
+        "inference already running" rejection) into an `InferenceFailedEvent`, so the
+        CLI always receives a terminal event for its `request_id`. As a second line of
+        defense, the CLI applies a liveness timeout (3 × progress interval) and fails
+        the step instead of waiting forever if the ServiceHost goes silent.
+
+      Frissítsd az "Updated" dátumot.
+
+  - path: DevScaffold/Scaffold.CLI/ADR-CLI.md
+    change: |
+      A #11 (TaskCompletionSource) döntéshez add hozzá a liveness timeout leírását
+      és indoklását (progress-alapú, a human review idejére felfüggesztve).
+
+acceptance_criteria:
+  - "Ha fut egy inference és egy második InferRequest érkezik, a második request_id-ra InferenceFailedEvent megy ki"
+  - "A HandleInferAsync-ben nincs olyan catch, amely a háttérfeladat kivételeit nem kaphatja el"
+  - "A PublishInferenceStartedAsync az ExecuteInferenceAsync try blokkján belül van"
+  - "Nincs dupla InferenceFailed esemény ugyanarra a request_id-ra"
+  - "A CLI liveness időkorlát lejártakor exit 1-gyel áll le, az audit logban inference_liveness_timeout sor van"
+  - "A human validációs prompt közben nem jár le időkorlát"
+  - "Mindkét ADR tartalmazza a változást"
+  - "A solution lefordul hibák nélkül; a meglévő end-to-end folyamat (--step, Accept) változatlanul működik"

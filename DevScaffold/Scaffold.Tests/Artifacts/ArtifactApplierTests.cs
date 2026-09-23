@@ -59,7 +59,7 @@ public sealed class ArtifactApplierTests
         var result = ArtifactApplier.Apply(
             _outputBasePath, ["coding_1"], _projectRoot, dryRun: true);
 
-        Assert.AreEqual(1, result.Entries.Count);
+        Assert.HasCount(1, result.Entries);
         Assert.AreEqual(ArtifactApplyStatus.WouldCopy, result.Entries[0].Status);
         Assert.AreEqual(0, result.CopiedCount);
         Assert.IsFalse(File.Exists(Path.Combine(_projectRoot, "Foo.cs")));
@@ -86,7 +86,7 @@ public sealed class ArtifactApplierTests
         var result = ArtifactApplier.Apply(
             _outputBasePath, ["coding_2"], _projectRoot, dryRun: false);
 
-        Assert.AreEqual(0, result.Entries.Count);
+        Assert.IsEmpty(result.Entries);
         CollectionAssert.Contains(result.SkippedFoldersWithoutArtifacts.ToList(), "coding_2");
     }
 

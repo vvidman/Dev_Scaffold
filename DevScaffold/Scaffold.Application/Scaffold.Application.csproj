@@ -13,4 +13,7 @@
     <ProjectReference Include="..\Scaffold.Domain\Scaffold.Domain.csproj" />
     <ProjectReference Include="..\Scaffold.Validation.Abstractions\Scaffold.Validation.Abstractions.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Scaffold.Tests" />
+  </ItemGroup>
 </Project>

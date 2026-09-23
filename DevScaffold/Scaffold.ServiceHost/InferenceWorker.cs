@@ -39,7 +39,7 @@ namespace Scaffold.ServiceHost;
 /// - Fetching the backend from ModelCache (with lazy loading)
 /// - Running the inference through the backend
 /// - Writing the output to a file
-/// - Sending periodic InferenceProgressEvents
+/// - Sending an InferenceProgressEvent heartbeat on every tick (model load, prompt processing, generation)
 /// - Sending InferenceCompletedEvent / InferenceFailedEvent / InferenceCancelledEvent
 /// </summary>
 public class InferenceWorker : IInferenceWorker
@@ -52,16 +52,21 @@ public class InferenceWorker : IInferenceWorker
     private CancellationTokenSource? _activeInferenceCts;
     private readonly SemaphoreSlim _inferenceLock = new(1, 1);
 
-    private static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(30);
+    /// <summary>Default heartbeat interval – the CLI liveness timeout is 3 × this value.</summary>
+    public static readonly TimeSpan DefaultProgressInterval = TimeSpan.FromSeconds(30);
+
+    private readonly TimeSpan _progressInterval;
 
     public InferenceWorker(
         IInferenceBackendProvider modelCache,
         IInferenceEventPublisher eventPublisher,
-        string outputBasePath)
+        string outputBasePath,
+        TimeSpan? progressInterval = null)
     {
         _modelCache = modelCache;
         _eventPublisher = eventPublisher;
         _outputBasePath = outputBasePath;
+        _progressInterval = progressInterval ?? DefaultProgressInterval;
     }
 
     /// <summary>
@@ -122,6 +127,7 @@ public class InferenceWorker : IInferenceWorker
     {
         var startTime = DateTime.UtcNow;
         var outputFilePath = BuildOutputPath(request);
+        var progressState = new ProgressState();
 
         try
         {
@@ -131,33 +137,41 @@ public class InferenceWorker : IInferenceWorker
                 request.ModelAlias,
                 cancellationToken);
 
-            var backend = await _modelCache.GetOrLoadAsync(
-                request.RequestId,
-                request.ModelAlias,
+            // Heartbeat: the progress timer covers the whole request lifetime –
+            // model loading, prompt processing and generation – so the CLI's
+            // liveness timeout measures ServiceHost silence, not model speed.
+            using var progressTimer = new PeriodicTimer(_progressInterval);
+            var progressTask = RunProgressTimerAsync(
+                request,
+                startTime,
+                progressState,
+                progressTimer,
                 cancellationToken);
 
-            Directory.CreateDirectory(Path.GetDirectoryName(outputFilePath)!);
-
-            // CountingTextWriter intercepts the token writes –
-            // the progress timer reads the counter without the backend
-            // implementation needing to change.
-            using var progressTimer = new PeriodicTimer(ProgressInterval);
-
             uint tokensGenerated;
-            await using (var fileWriter = new StreamWriter(outputFilePath, append: false))
+            try
             {
-                var countingWriter = new CountingTextWriter(fileWriter);
-
-                var progressTask = RunProgressTimerAsync(
+                var backend = await _modelCache.GetOrLoadAsync(
                     request.RequestId,
-                    request.StepId,
-                    startTime,
-                    countingWriter,
-                    progressTimer,
+                    request.ModelAlias,
                     cancellationToken);
 
-                tokensGenerated = await backend.RunAsync(request, countingWriter, cancellationToken);
+                Directory.CreateDirectory(Path.GetDirectoryName(outputFilePath)!);
 
+                await using var fileWriter = new StreamWriter(outputFilePath, append: false);
+
+                // CountingTextWriter intercepts the token writes –
+                // the progress timer reads the counter without the backend
+                // implementation needing to change.
+                var countingWriter = new CountingTextWriter(fileWriter);
+                progressState.Writer = countingWriter;
+
+                tokensGenerated = await backend.RunAsync(request, countingWriter, cancellationToken);
+            }
+            finally
+            {
+                // Stop the heartbeat before any terminal event is published,
+                // on success, failure and cancellation alike.
                 progressTimer.Dispose();
                 await progressTask;
             }
@@ -190,40 +204,57 @@ public class InferenceWorker : IInferenceWorker
         }
     }
 
+    /// <summary>
+    /// Sends an InferenceProgressEvent on every tick until the timer is disposed.
+    /// Every tick publishes – the event doubles as the liveness heartbeat.
+    /// </summary>
     private async Task RunProgressTimerAsync(
-        string requestId,
-        string stepId,
+        InferRequest request,
         DateTime startTime,
-        CountingTextWriter countingWriter,
+        ProgressState progressState,
         PeriodicTimer timer,
         CancellationToken cancellationToken)
     {
         try
         {
-            bool startGenMessageSent = false;
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
                 var elapsed = (DateTime.UtcNow - startTime).TotalSeconds;
-                var tokens = countingWriter.TokenCount;
-                var tokensPerSec = elapsed > 0 ? tokens / elapsed : 0;
+                var statusMessage = BuildStatusMessage(request.ModelAlias, progressState.Writer, elapsed);
 
-                string statusMessage = "";
-                if (tokens > 0)
-                    statusMessage = $"Generation in progress... {(uint)elapsed}s | {tokens:N0} tokens | {tokensPerSec:F1} tok/s";
-                else if (!startGenMessageSent)
-                {
-                    startGenMessageSent = true;
-                    statusMessage = $"Generation in progress... {(uint)elapsed}s | model loaded, generation starting";
-                }
-
-                if (!string.IsNullOrWhiteSpace(statusMessage))
-                {
-                    await _eventPublisher.PublishInferenceProgressAsync(
-                        requestId, stepId, (uint)elapsed, statusMessage, cancellationToken);
-                }
+                await _eventPublisher.PublishInferenceProgressAsync(
+                    request.RequestId, request.StepId, (uint)elapsed, statusMessage, cancellationToken);
             }
         }
         catch (OperationCanceledException) { }
+    }
+
+    private static string BuildStatusMessage(string modelAlias, CountingTextWriter? writer, double elapsed)
+    {
+        if (writer is null)
+            return $"Loading model '{modelAlias}'... {(uint)elapsed}s";
+
+        var tokens = writer.TokenCount;
+        if (tokens == 0)
+            return $"Processing prompt... {(uint)elapsed}s";
+
+        var tokensPerSec = elapsed > 0 ? tokens / elapsed : 0;
+        return $"Generation in progress... {(uint)elapsed}s | {tokens:N0} tokens | {tokensPerSec:F1} tok/s";
+    }
+
+    /// <summary>
+    /// Phase shared between the inference and the progress timer:
+    /// Writer is null while the model is loading.
+    /// </summary>
+    private sealed class ProgressState
+    {
+        private volatile CountingTextWriter? _writer;
+
+        public CountingTextWriter? Writer
+        {
+            get => _writer;
+            set => _writer = value;
+        }
     }
 
     /// <summary>

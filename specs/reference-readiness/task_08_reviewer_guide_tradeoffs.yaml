@@ -1,0 +1,187 @@
+task_id: "08"
+title: "README — olvasási útmutató bírálóknak, lépés-életciklus szekvenciadiagram, kompromisszumok és ismert korlátok"
+depends_on: ["03", "07"]
+
+description: |
+  A README jelenleg azt mondja el, MIT csinál a rendszer és MIÉRT jók a döntések.
+  Egy rendszertervezési referenciánál a bíráló két dolgot keres még:
+  - hol kezdje az olvasást (10 perce van),
+  - mit adott fel a tervező az egyes döntésekért, és tudja-e, hol vannak a határok.
+
+  A "Trade-offs and Known Limitations" szakasz a legfontosabb része ennek a
+  tasknak: az őszintén leírt korlátok erősebb senior jelzést adnak, mint a
+  hiányuk. Minden pontot ELLENŐRIZZ a kódban, mielőtt beírod — ha valami már
+  nem igaz (pl. időközben javult), hagyd ki vagy fogalmazd át. Ne találj ki
+  korlátot, ami nincs.
+
+  Emellett a specs/ mappa (Claude Code task fájlok, magyarul) jelenleg
+  kontextus nélkül áll. Ez maga is referenciaérték ("the human orchestrates,
+  the AI executes" a fejlesztési folyamatban is), ezért kap egy angol README-t.
+  A task fájlok maradnak magyarul — ezek eredeti munkadokumentumok, és ezt
+  a README ki is mondja.
+
+files_to_modify:
+  - path: README.md
+    change: |
+      1. "Reading guide" szakasz közvetlenül a "Why This Exists" után:
+
+         ## Reading Guide for Reviewers
+
+         If you have ten minutes, read in this order:
+
+         1. **This README** – the design decisions and the trade-offs below.
+         2. **[ADR-Protocol](DevScaffold/Scaffold.Agent.Protocol/ADR-Protocol.md)** – the IPC contract: envelopes, correlation, framing.
+         3. **[ADR-ServiceHost](DevScaffold/Scaffold.ServiceHost/ADR-ServiceHost.md)** – process lifecycle, model cache, concurrency, the fire-and-forget failure path.
+         4. **[ADR-CLI](DevScaffold/Scaffold.CLI/ADR-CLI.md)** – why the CLI is step-scoped, and how the design evolved through four refactor rounds.
+         5. **[ADR-Validation](DevScaffold/Scaffold.Validation/ADR-Validation.md)** – where automation stops and human judgment starts.
+         6. **[specs/](specs/)** – the task files this code was implemented from.
+
+         Code entry points: `Scaffold.Application/ScaffoldStepOrchestrator.cs` (the retry loop),
+         `Scaffold.ServiceHost/CommandDispatcher.cs` (command routing), `Scaffold.Tests/` (the decisions, pinned as tests).
+
+      2. "Step Lifecycle" szakasz az "Architecture Overview" diagram után.
+         A diagramot vesd össze a kóddal (ScaffoldStepOrchestrator, InferenceResultHandler,
+         ServiceHostLauncher, InferenceWorker) — az eseménynevek és a sorrend a
+         valóságot tükrözzék:
+
+         ### Step Lifecycle
+
+         One `DevScaffold --step` invocation, including an automatic rejection and a human decision:
+
+         ```mermaid
+         sequenceDiagram
+             actor Human
+             participant CLI as DevScaffold CLI
+             participant SH as ServiceHost
+             participant LLM as Inference backend
+
+             Human->>CLI: DevScaffold --step coding --input task_03.yaml
+             CLI->>CLI: assemble input, compute generation → coding_4/
+             alt ServiceHost not running
+                 CLI->>SH: start process
+             end
+             SH-->>CLI: ServiceReadyEvent
+
+             loop until accepted, rejected by human, or max attempts
+                 CLI->>SH: InferRequest (request_id, system prompt [+ refinement context])
+                 SH-->>CLI: InferenceStartedEvent
+                 SH->>LLM: generate (model loaded lazily, cached)
+                 SH-->>CLI: InferenceProgressEvent (every 30 s)
+                 SH-->>CLI: InferenceCompletedEvent (output_file_path)
+                 CLI->>CLI: universal + per-step validation
+                 alt validation errors
+                     CLI->>CLI: [AUTO] refinement from FixHints – retry without human
+                 else passed
+                     CLI->>Human: Accept / Edit / Reject?
+                     alt Reject with clarification
+                         Human-->>CLI: clarification (rejected text is NOT sent back)
+                     else Accept / Edit
+                         Human-->>CLI: decision
+                     end
+                 end
+             end
+
+             CLI->>CLI: post-processors → artifacts/, tasks/
+             CLI->>CLI: audit.log (SESSION_END)
+             CLI-->>Human: exit 0 accepted / 1 error / 2 rejected
+             Note over SH: stays alive – models remain in memory for the next step
+         ```
+
+      3. "Trade-offs and Known Limitations" szakasz a "Project Status" ELÉ.
+         Formátum: táblázat, három oszlop. Az alábbi sorokat ellenőrizd a kódban:
+
+         ## Trade-offs and Known Limitations
+
+         These are deliberate choices for a single-developer, local-first tool. Each one
+         would be revisited before multi-user or server deployment.
+
+         | Area | Current choice | Cost / what would change at scale |
+         |---|---|---|
+         | Trust boundary | Named Pipes on the local machine; no authentication, no pipe ACL | Any local process running as the same user can connect. Multi-user use would need pipe security descriptors or a socket transport with auth. |
+         | Concurrency | One inference at a time (`SemaphoreSlim(1,1)`), a second request is rejected with `InferenceFailedEvent` | Right for CPU-only inference; a GPU or remote backend would benefit from a queue and per-request cancellation (the `CancelInferRequest` contract already carries `request_id`). |
+         | Protocol versioning | `ServiceReadyEvent.version` is sent but not checked by the CLI | A CLI/ServiceHost version mismatch is not detected. Next step: compare major versions on connect and fail fast. |
+         | State | The filesystem is the state store (generation numbering, audit logs) | Simple and restart-safe, but two CLIs running the same step concurrently could race on the generation number. Acceptable with one human orchestrator. |
+         | `--apply` | Always overwrites; mitigated by `--dry-run` and path validation | No backup or VCS integration. At scale: apply onto a git branch and let the human review the diff. |
+         | Truncation detection | Heuristic on the last line (`TRUNCATED_OUTPUT`) | Can produce false positives/negatives. Consistent with the principle that validators only check necessary conditions – a false positive costs one retry. |
+         | Retry budget | Max 5 attempts per step, hard-coded | Should become a per-step config value. |
+         | Progress feedback | Progress events every 30 s, no token streaming | Deliberate: the workflow is file-based review, not interactive chat. |
+         | Platform | Developed and run on Windows; shutdown detection uses the Windows pipe namespace (`\\.\pipe\`) | Linux/macOS run of the full tool is untested; CI runs build and unit tests on both. |
+         | Observability | Per-generation plain-text `audit.log` (key=value) | Parser-friendly but not aggregated. At scale: emit OpenTelemetry traces/metrics (attempts, violation rates, tok/s per step) instead of only files. |
+
+         Ellenőrizendő a táblázat előtt:
+         - Tényleg Windows-specifikus-e a shutdown pipe-ellenőrzés (Program.cs ShutdownAsync:
+           File.Exists(@"\\.\pipe\...")), és van-e más ilyen hely (ServiceHostLauncher)?
+         - A MaxAttempts valóban 5 és hardkódolt-e (ScaffoldStepOrchestrator)?
+         - A CLI tényleg nem ellenőrzi a version mezőt?
+         - A "second request is rejected with InferenceFailedEvent" csak a task_03 után igaz — ellenőrizd.
+
+      4. "Development Process" rövid szakasz a "Getting Started" elé:
+
+         ## Development Process
+
+         The code was built with the same philosophy it implements. Architecture was
+         decided in discussion and recorded as ADRs; implementation was split into small,
+         dependency-ordered task files and executed by Claude Code; every change was
+         verified by live end-to-end runs. The task files are kept in [specs/](specs/)
+         as the original working record.
+
+  - path: CLAUDE.md
+    change: |
+      Az "## ADRs" rész után egy mondat: a README "Trade-offs and Known Limitations"
+      szakaszát frissíteni kell, ha egy változás megszüntet vagy bevezet egy korlátot.
+
+files_to_create:
+  - path: specs/README.md
+    content: |
+      # specs/ – Implementation Task Files
+
+      This folder is the working record of how DevScaffold was built.
+
+      ## How the work is run
+
+      1. **Design first.** An architectural change is discussed until the decisions are
+         clear, then recorded in the relevant ADR.
+      2. **Split into tasks.** The change is broken into small YAML task files with explicit
+         `depends_on` ordering. Each task names the files to create or modify, the intended
+         change, and verifiable `acceptance_criteria`.
+      3. **AI executes, human verifies.** Claude Code executes one task at a time; the human
+         reviews the diff and runs the acceptance checks before the next task starts.
+      4. **Live test.** After a task set is complete, the feature is exercised end to end
+         with real models.
+
+      This is the Scaffold Protocol applied to its own development: the human orchestrates,
+      the AI executes.
+
+      ## Task file format
+
+      ```yaml
+      task_id: "05"
+      title: "..."
+      depends_on: ["01"]
+      description: |        # why, and the decisions already made
+      files_to_create: []   # path + content or precise spec
+      files_to_modify: []   # path + change
+      acceptance_criteria: [] # checked by the human before moving on
+      ```
+
+      ## Folders
+
+      | Folder | Scope |
+      |---|---|
+      | `coder-step-tasks/` | Post-processing pipeline, artifact extraction, `--input`, `--apply` |
+      | `reference-readiness/` | Hardening for public review: config hygiene, path guard, failure path, tests, CI, documentation |
+
+      (Claude Code: listázd a specs/ tényleges almappáit, és mindegyikhez írj egy sort.)
+
+      ## Language
+
+      Task files are written in Hungarian – they are the author's original working
+      documents and are kept unedited as an authentic record. Code, ADRs and all
+      user-facing documentation are in English.
+
+acceptance_criteria:
+  - "A README tartalmazza a Reading Guide, Step Lifecycle, Trade-offs and Known Limitations és Development Process szakaszokat"
+  - "A mermaid diagram GitHubon hibátlanul renderel, és az üzenetnevek léteznek az events.proto / commands.proto fájlokban"
+  - "A Trade-offs táblázat minden sora a kód alapján igaz (a task végén felsorolva, melyik sort mi alapján ellenőrizted)"
+  - "specs/README.md létezik, angol, és minden valós almappát felsorol"
+  - "A README-ben nincs törött relatív link"

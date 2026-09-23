@@ -113,7 +113,7 @@ DevScaffold shutdown  →  ServiceHost stops                                 →
 - `IInputAssembler` — input YAML assembly and path reference resolution
 - `ConsoleHumanValidationService` — human validation interaction
 - `FileAuditLogger` — audit log writing
-- Generation number computation — determines the step output folder
+- Generation number computation — via `GenerationCalculator` (Scaffold.Application)
 
 ---
 
@@ -204,6 +204,16 @@ interval, see ADR-Protocol #13), the wait is cancelled and `HandleAsync` throws 
 is stopped (`Timeout.InfiniteTimeSpan`) as soon as `InferenceCompleted` starts processing,
 because the human validation prompt (Accept/Edit/Reject) can legitimately take an unbounded
 amount of time and is not a ServiceHost failure.
+
+**Cancel on timeout:** Before throwing, the handler sends a best-effort
+`CancelInferRequest` with the same `request_id` (2s send timeout, exceptions swallowed), so
+the ServiceHost does not keep working on an abandoned request and the next `--step` is not
+rejected with "already running". The audit line records the outcome:
+`reason=inference_liveness_timeout timeout=90s cancel_sent=true|false`. `Program.cs` handles
+the `TimeoutException` as an expected state: a clear message and a `DevScaffold shutdown`
+hint, no stack trace, exit code 1. The timeout is meaningful only because the ServiceHost
+sends a heartbeat on every progress tick for the whole request lifetime, model loading and
+prompt processing included (ADR-ServiceHost #9).
 
 ---
 

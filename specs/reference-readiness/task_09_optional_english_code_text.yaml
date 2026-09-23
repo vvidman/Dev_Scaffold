@@ -1,0 +1,58 @@
+task_id: "09"
+title: "(OPCIONÁLIS) Kód-szintű szövegek angolra — XML doc kommentek, konzol- és hibaüzenetek, FixHint-ek"
+depends_on: ["05", "08"]
+
+description: |
+  OPCIONÁLIS, de az egyik része tartalmi javítás, nem csak kozmetika.
+
+  A) TARTALMI RÉSZ — ezt javasolt mindenképp megcsinálni:
+     A validátorok FixHint és Description szövegei részben magyarok
+     (pl. UniversalOutputValidator: "A kimenet üres vagy csak whitespace karaktereket tartalmaz.").
+     A FixHint-ek a RefinementStrategy-n keresztül bekerülnek a modell system
+     promptjába, amelynek a többi része angol ("The previous attempt was
+     automatically rejected..."). A vegyes nyelvű refinement kontextus egy 7B-s
+     helyi modellnek rontja az utasításkövetést. Ezek legyenek egységesen angolok.
+
+  B) KOZMETIKAI RÉSZ:
+     XML doc kommentek, // kommentek, konzolüzenetek, kivételüzenetek angolra.
+     Nagy, mechanikus változás — projektenként, külön commitban végezd, hogy
+     a diff átnézhető maradjon.
+
+  Szabályok:
+  - Csak szövegeket fordíts. Azonosító, logika, sorrend, formázás NEM változik.
+  - Az audit log tag-ek és a key=value kulcsok (pl. reason=inference_failed)
+    NEM változnak — ezek parser-szerződések (ADR-CLI #17).
+  - A konzol prefixek ([SCAFFOLD], [SESSION], [VALIDATE], [POST], [ServiceHost]) maradnak.
+  - A RuleId-k (EMPTY_OUTPUT, STOP_TOKEN_LEAKED, ...) maradnak.
+  - A specs/ mappa task fájljait NE fordítsd (lásd specs/README.md).
+  - Fordítás közben ne "javíts" csendben tartalmat. Ha egy komment téves vagy
+    elavult, jelöld a commit üzenetben, és javítsd külön, egyértelmű módosításként.
+
+files_to_modify:
+  - path: "A) DevScaffold/Scaffold.Validation/**, DevScaffold/Scaffold.Validation.Steps/**"
+    change: |
+      Minden ValidationViolation Description és FixHint szöveg angolra.
+      Commit: "Validation: English violation descriptions and fix hints (enter the refinement prompt)"
+
+  - path: "A) DevScaffold/Scaffold.Application/RefinementStrategy.cs és InferenceResultHandler.cs"
+    change: |
+      Ellenőrizd, hogy a modellnek átadott összes szöveg angol
+      (pl. az InferenceCancelled ágban a "Inference megszakítva." clarification).
+
+  - path: "B) Projektenként, ebben a sorrendben, külön commitokban"
+    change: |
+      1. Scaffold.Domain
+      2. Scaffold.Validation.Abstractions
+      3. Scaffold.Application
+      4. Scaffold.Infrastructure.ConfigHandler
+      5. Scaffold.ServiceHost.Abstractions
+      6. Scaffold.ServiceHost
+      7. Scaffold.CLI
+      8. Scaffold.Agent.Protocol/protos/*.proto (kommentek)
+      Minden commit után: dotnet build + dotnet test zöld.
+
+acceptance_criteria:
+  - "A) rész: a modellnek átadott refinement kontextus teljes egészében angol"
+  - "A tesztek nem változtak, és zölden futnak (a tesztek nem assertálnak magyar szövegre — ha mégis, azt a tesztet igazítsd)"
+  - "Audit log tag-ek, key=value kulcsok, RuleId-k és konzol prefixek változatlanok"
+  - "B) rész: projektenként külön commit; `git grep` magyar ékezetes karakterre (á|é|ő|ű) a DevScaffold/ alatt csak a szándékosan meghagyott helyeken ad találatot"
